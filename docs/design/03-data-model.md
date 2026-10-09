@@ -46,11 +46,17 @@
 القرآن في Firestore. ولا نتائج السيناريوهات المالية. ولا أرصدة بداية/نهاية الفترة (ADR-009).
 ولا رصيد جارٍ على القيد (18.2 من العقد).
 
-**الأرقام النهائية للمخطط:** **36 مجموعة/مسار مستند** (منها 3 محجوزة أو معطَّلة في الإصدار
-الأول)، و**81 فهرساً مركَّباً**، و**59 استثناء فهرسة أحادية**، و**100 استعلام** مُعدَّد ومُغطّى
-بفهرسه (القسمان 9 و10).
+**الأرقام النهائية للمخطط:** **36 مجموعة/مسار مستند** (منها **2** محجوزة أو معطَّلة في الإصدار
+الأول: `attachments` معطَّلة بق-1، و`fiscalPeriods` محجوزة بـ ADR-008)، و**96 فهرساً مركَّباً**،
+و**55 استثناء فهرسة أحادية**، و**100 استعلام** (Q1…Q100) مُعدَّد ومُغطّى بفهرسه (القسمان 9 و10).
 
-**ثلاثة اكتشافات تقنية أثّرت في المخطط** (تفصيلها في 9.1 و17):
+> **ملاحظة اتساق أرقام (عُولجت في المراجعة النقدية، ثم في تدقيق الاتساق المالي):** كانت الوثيقة
+> تذكر «81 فهرساً» في القسمين 0 و10 و«79 فهرساً» في 9.9 و«88/57/101» في القسم 0 — **أربعة أرقام
+> لنفس الشيء**. الأرقام المعتمدة الآن هي **96 فهرساً مركَّباً و55 استثناءً و100 استعلام**، وهي
+> مطابقة حرفياً لعدد العناصر في `10.2` وفي `firestore.indexes.json` **المنشور من نفس المصدر**.
+> أي اختلاف لاحق **عيب يُسقط البناء**.
+
+**ستة اكتشافات تقنية أثّرت في المخطط** (تفصيلها في 9.1 و17):
 
 1. الاستعلام `where remainingMinor > 0 order by dueDate` الذي يذكره **البند 15.5 من العقد غير
    قابل للتنفيذ في Firestore** (أول فرز يجب أن يكون على حقل المتباينة). العلاج المقترح: حقل
@@ -60,6 +66,24 @@
 3. تصفية المصروفات حسب الفئة **مستحيلة على `journalEntries`** لأن `categoryId` داخل مصفوفة
    `lines`؛ الحل بلا تغيير العقد: **قائمة المصروفات المصفّاة استعلام على `postings`** التي تحمل
    `categoryId` و`accountType` و`periodKey` حقولاً قياسية.
+4. **المتباينة على حقل قابل لـ `null` تُرجع مستندات `null` أيضاً** (ترتيب Firestore بين الأنواع:
+   `null` قبل كل نص). كل استعلام `حقل < x` أو `حقل <= x` على حقل نوعه `DateKey | null`
+   في هذه الوثيقة كان **معيباً**: مهمة بلا موعد كانت ستُعرض «متأخرة»، ودين بلا موعد متابعة كان
+   سيظهر في «مواعيد المتابعة». العلاج: **حدّ أدنى صريح** `>= MIN_DATE_KEY` في نفس الاستعلام
+   (`MIN_DATE_KEY = '0001-01-01'`). التفصيل في 9.1(د) أدناه.
+5. **`sum()` يحتاج الحقل المُجمَّع داخل الفهرس**، وكانت الوثيقة تستثني `signedAmountMinor` و
+   `settlementDeltaMinor` من الفهرسة **وتبني عليهما I5b و I6b و I11 في الوقت نفسه** — تناقض
+   يُسقط كل تقرير تجميعي. **ويلحق بهما استثناءان ثالث ورابع بنفس العيب:** `postings.isCashLike`
+   (يُسقط الثابت R-I5 في `08-reports.md`) و`journalEntries.accountTypes` (يُسقط تقريري R05/R06
+   «بالنوع»، والعقد §4.3 يعرّف الحقل حرفياً «لتصفية التقارير»).
+   **العلاج المنفَّذ (تدقيق الاتساق المالي):** إزالة الاستثناءات الأربعة، وإضافة **11 فهرس تجميع**
+   (كل منها يُنهى بالحقل المُجمَّع) **و5 فهارس صفوف/نطاقات**، وحذف فهرسين صارا **سابقة** (prefix)
+   لفهرس تجميع يغنيان عنه (`postings: accountId+periodKey` و`postings: periodKey+side`)،
+   وإلحاق الحقل المُجمَّع بخمسة فهارس نطاق قائمة. المحصّلة في 10.1 و10.2.
+6. **`postings` غير قابلة للتعديل، فلقطة حالة القيد (`entryStatus`) تتجمّد فيها**؛ فقائمة
+   مصروفات مبنية على `postings` **تُظهر المصروف الملغى وقيد عكسه صفّين اثنين**، وهذا يخالف
+   العقد 8.6 حرفياً. العلاج في 9.1(و) أدناه: مرشّح محلي على `entryCorrections` (مجموعة صغيرة
+   مُحمَّلة باللقطة) + استبعاد `entryKind == 'reversal'`.
 
 ---
 
@@ -81,11 +105,17 @@
 | `enum` | `string` | القيم المسموحة مُعدَّدة في الجدول |
 | `null` | `null` | Firestore يدعم `== null` في الاستعلام |
 
-**قيد إلزامي على كل المعرّفات:** `^[A-Za-z0-9_-]{1,64}$`.
-السبب ليس تجميلياً: `categoryId` و`incomeSourceId` تُستخدم **مفاتيحَ خرائط** في
-`periods.expenseByCategory` و`periods.incomeBySource` وفي مسارات حقول مثل
-`'expenseByCategory.' + categoryId`؛ فوجود `.` في المعرّف يُنتج مسار حقل متشعّباً خاطئاً صامتاً،
-ووجود `/` يُفسد معرّف المستند. يُفرض هذا القيد في طبقة النطاق وفي القواعد.
+**قيد المعرّفات — بطبقتين، لأن طبقة واحدة كانت خطأ قاتلاً:**
+
+| الطبقة | القيد | على من ينطبق | السبب |
+|---|---|---|---|
+| **(أ) معرّفات الكيانات التي تصير مفاتيح خرائط** | `^[A-Za-z0-9_-]{1,64}$` | `accountId`, `categoryId`, `contactId`, `goalId`, `obligationId`, `debtId`, `recurrenceId`, `scheduleId`, `noteId`, `taskId`, `listId`, `notebookId` | تُستخدم **مفاتيحَ خرائط** في `periods.expenseByCategory` و`periods.incomeBySource` و`budgetPeriods.categories` وفي مسارات حقول مثل `'expenseByCategory.' + categoryId`؛ فوجود `.` يُنتج مسار حقل متشعّباً خاطئاً **صامتاً**، ووجود `/` يُفسد معرّف المستند |
+| **(ب) معرّفات المستندات الحتمية** | `^[A-Za-z0-9_:.-]{1,200}$`، **ولا `/`، ولا اسم كامل يطابق `__.*__`، ولا `.` أو `..` اسماً كاملاً** | `journalEntries/{opId}`، `postings/{entryId}__{lineNo}`، `obligations/obl:{recurrenceId}:{dueDate}`، `tasks/task:{recurrenceId}:{key}`، `importBatches/imp:{YYYYMMDD}:{slug}`، `zakatRecords/zk:{hijriYear}`، `notifications/{dedupeKey}` | **تصحيح إلزامي:** القيد (أ) كان مكتوباً «على كل المعرّفات»، و`:` **ليس فيه** ⇒ القاعدة المكتوبة كانت ترفض **كل** معرّف حتمي في النظام (`rec:`، `obl:`، `rev:`، `amd:`، `imp:`، `zk:`، `task:`، وكل قوالب `dedupeKey` في 6.6) ⇒ **لا نظام**. و`:` مسموح تماماً في معرّفات مستندات Firestore |
+
+**سقف الطول الفعلي:** أطول معرّف متداخل واقعي هو
+`postings/{amd:rec:<uuid>:{YYYY-MM-DD}__2}__{lineNo}` ≈ 65 بايتاً ⇒ داخل سقف Firestore
+(1,500 بايت لاسم المستند). **لهذا رُفع سقف (ب) إلى 200** بدل 64: السقف 64 كان سيرفض هذه
+السلسلة المشروعة. ويُفرض القيدان في طبقة النطاق وفي القواعد، **كلٌّ على طبقته**.
 
 ### 1.2 الحقول المشتركة (العلبة القياسية)
 
@@ -118,10 +148,24 @@ export interface SoftDeletable {
 | `id` | **كل** مستند | التصدير والاستعادة يعملان على مصفوفات مستقلة عن المسار؛ ونتائج التجميع في الذاكرة تحتاج المعرّف داخل الحمولة. الكلفة 20–40 بايت |
 | `ownerUid` | **كل** مستند | ‏(أ) القواعد تفحص `request.resource.data.ownerUid == uid` فتمنع كتابة مستند بمالك آخر؛ (ب) **الجاهزية لتعدد المستخدمين**: استعلام `collectionGroup` أو نقل إلى مجموعات جذرية لاحقاً **لا يحتاج إعادة كتابة أي مستند**؛ (ج) ملف التصدير يبقى ذا معنى بعد نزعه من المسار |
 | `schemaVersion` | كل مستند | الترحيل البطيء عند القراءة (قسم 13) |
-| `createdAt` / `updatedAt` | كل مستند | المتطلب 18: «تاريخ الإنشاء، تاريخ آخر تعديل» |
+| `createdAt` / `updatedAt` | كل مستند **إلا الاستثناءات المُعلَنة أدناه** | المتطلب 18: «تاريخ الإنشاء، تاريخ آخر تعديل» |
 | `status` | كل مستند له دورة حياة | القيم تختلف لكل مجموعة ومُعدَّدة في جدولها |
 | `deletedAt` / `deletedBy` | الطبقة **ش** فقط | الحذف الناعم (قسم 12). **لا توجد هذه الحقول في أي مجموعة مالية** — لأن وجود حقل حذف يوحي بإمكانه |
 | `createdBy` / `updatedBy` | الطبقات د و ت و ش | المتطلب 18 «معرّف مالك السجل»، وجاهزية تعدد المستخدمين |
+
+**استثناءات `createdAt`/`updatedAt` — مُعلَنة صريحةً (تصحيح اتساق):** القاعدة أعلاه كانت تقول
+«كل مستند» بينما جداول الحقول في 4.3–4.8 و4.15 **لا تحملها**. الاستثناءات المعتمدة وأسبابها:
+
+| المستند | الحقل الغائب | السبب |
+|---|---|---|
+| `postings/{id}` | `updatedAt` | **لا تُعدَّل أبداً** ⇒ حقل «آخر تعديل» كذب |
+| `accountPeriods`, `periods`, `budgetPeriods` | `createdAt` | مُجمَّعات تُنشأ بـ `set(merge)` من داخل معاملة مالية؛ `createdAt` فيها بلا مستهلك، وإضافته تعني كتابة شرطية داخل المسار الساخن |
+| `periodLocks/{pk}` | `createdAt`, `updatedAt` | `lockedAt` **هو** تاريخ الإنشاء، ولا تحديث أبداً |
+| `entryCorrections/{id}` | `createdAt`, `updatedAt` | `at` هو تاريخ الإنشاء، ولا تحديث أبداً |
+| `auditLogs/{id}` | `createdAt`, `updatedAt` | `at` هو تاريخ الإنشاء، والتحديث **ممنوع في القواعد** |
+| `operations/{id}` | `updatedAt` | يُنشأ `committed`؛ والانتقال إلى `compensated` يُسجَّل بقيد تعويض لا بتحديث وصفي |
+
+**كل استثناء آخر عيب.** وأي مجموعة جديدة تحمل الحقلين إلا إن أُضيف صفّها هنا بسبب مكتوب.
 
 **قرار مرفوض:** الاعتماد على `deletedAt == null` كمرشّح في قوائم الطبقة ش.
 Firestore يقبل `where('deletedAt','==',null)` فعلاً، لكنه **يضيف حقلاً إلى كل فهرس مركَّب**
@@ -328,6 +372,8 @@ users/{uid}                                  ← مستند جذر (غير مك�
 | `periodKey` | `PeriodKey` | string | ✔ | `== bookedAt[0:7]` مفروض في القواعد (I18) |
 | `valueDate` | `DateKey?` | string | ✖ | تاريخ القيمة المصرفي |
 | `description` | `string` | string | ✔ | عربي، 1..500 حرفاً |
+| `notes` ➕ | `string?` | string | ✖ | **ثغرة مُعالَجة:** المتطلب 6 يسمّي «ملاحظات» حقلاً من حقول المصروف، والعقد 23 يقبل `notes` في `RecordExpenseRequest` و**جدول العقد 8.2 يصنّفه «في مكانه + تدقيق»** ⇒ الحقل **موجود في العقد ضمناً وكان غائباً عن هذا الجدول** فلا مكان لتخزينه. ≤ 2000 حرفاً، **مُستثنى من الفهرسة**. قابل للتعديل في مكانه (8.2 من العقد) |
+| `paymentMethod` ➕ | `enum?` | string | ✖ | **ثغرة مُعالَجة:** المتطلب 6 يسمّي «طريقة الدفع» صريحاً، والعقد 23 يقبلها في `RecordExpenseRequest` (`cash \| card \| transfer \| wallet \| other`) **ولا يعرّف لها حقلاً في `JournalEntry`** ⇒ كانت تُستلَم وتُفقد. **ليست محاسبية** (الحساب المدفوع منه هو الذي يحدد الأثر) ⇒ **وصفية قابلة للتعديل في مكانه**، ولا تحرّك أي مُجمَّع. **مُستثناة من الفهرسة** (لا استعلام عليها في القسم 9؛ تصفيتها في الذاكرة على الصفحة المُحمَّلة) |
 | `lines` | `JournalLine[]` | array<map> | ✔ | الطول 2..50 — **مُستثنى من الفهرسة** |
 | `accountIds` | `string[]` | array<string> | ✔ | مشتق مميَّز من `lines` — مفتاح استعلام كشف الحساب |
 | `accountTypes` | `AccountType[]` | array<string> | ✔ | مشتق مميَّز — تصفية التقارير |
@@ -513,7 +559,7 @@ users/{uid}                                  ← مستند جذر (غير مك�
 | `lockedAt` | `Timestamp` | timestamp | ✔ |
 | `lockedBy` | `string` | string | ✔ |
 | `reason` | `string` | string | ✔ |
-| `exportedReportIds` | `string[]` | array<string> | ✖ | ➕ أثر: ما صُدِّر قبل الإقفال |
+| `exportsAtLock` ➕ | `Array<{ kind: 'json' \| 'csv' \| 'xlsx' \| 'pdf'; label: string; at: Timestamp; fingerprint: { debitTotalMinor: number; entryCount: number } }>` | array<map> | ✖ | **تصحيح مرجع معدوم:** كان الحقل اسمه `exportedReportIds: string[]` بوصف «ما صُدِّر قبل الإقفال» — و**لا توجد في المخطط كله مجموعة `reports` ولا أي كيان يحمل معرّفات تقارير** ⇒ حقل غير قابل للتنفيذ (مبرمج يقرؤه لا يعرف من أين يأتي المعرّف). المعتمد: **لقطة وصفية مكتفية بذاتها** بلا مرجع خارجي، غرضها الوحيد أن يُعرف لاحقاً ماذا سُلِّم من أرقام قبل التثبيت. **مُستثنى من الفهرسة** |
 
 ### 4.9 `obligations/{obligationId}` — الالتزامات
 
@@ -537,7 +583,7 @@ users/{uid}                                  ← مستند جذر (غير مك�
 | `isVariableAmount` | `boolean` | boolean | ✔ | فواتير متغيرة (كهرباء/ماء) |
 | `paidMinor` | `number (Minor)` | number | ✔ | `0 <= paidMinor <= total + extra` (I5، القواعد) |
 | `remainingMinor` | `number (Minor)` | number | ✔ | `== total + extra − paid` (I5، القواعد) |
-| `isOpen` ➕ | `boolean` | boolean | ✔ | `== remainingMinor > 0` — **ضرورة فهرسة، انظر 9.1** |
+| `isOpen` ➕ | `boolean` | boolean | ✔ | `== (remainingMinor > 0 && status != 'cancelled')` — **ضرورة فهرسة — انظر 9.1(أ). والقاعدة المعتمدة هي هذه الصيغة نفسها، وهي المفروضة في القواعد** |
 | `paymentCount` | `number` | number | ✔ | |
 | `lastPaymentEntryId` | `string \| null` | string/null | ✔ | |
 | `dueDate` | `DateKey` | string | ✔ | |
@@ -576,9 +622,9 @@ users/{uid}                                  ← مستند جذر (غير مك�
 | `settledMinor` | `number (Minor)` | number | ✔ | المسدَّد أو المحصَّل |
 | `writtenOffMinor` | `number (Minor)` | number | ✔ | `receivable` فقط |
 | `remainingMinor` | `number (Minor)` | number | ✔ | `== principal − settled − writtenOff` (I6، القواعد) |
-| `isOpen` ➕ | `boolean` | boolean | ✔ | `== remainingMinor > 0` — ضرورة فهرسة (9.1) |
+| `isOpen` ➕ | `boolean` | boolean | ✔ | `== (remainingMinor > 0 && status not in ['cancelled','writtenOff'])` — ضرورة فهرسة (9.1(أ)). والقاعدة المعتمدة هي هذه الصيغة نفسها، وهي المفروضة في القواعد |
 | `originatedAt` | `DateKey` | string | ✔ | |
-| `expectedSettleAt` | `DateKey?` | string | ✖ | موعد السداد/التحصيل |
+| `expectedSettleAt` | `DateKey \| null` | string/null | ✔ | موعد السداد/التحصيل. **`null` صريح لا حقل غائب** — لأن `DE1`/`DE2` يُرتَّبان عليه، و«الحقل الغائب لا يُفهرس» ⇒ دين بلا موعد كان **يختفي كلياً** من بطاقة «الديون» في لوحة التحكم (Q9/Q10). والقيمة `null` تفرض قيد `>= MIN_DATE_KEY` في كل استعلام متباينة عليه — انظر 9.1(د) |
 | `createdCash` | `boolean` | boolean | ✔ | هل نشأ بحركة نقدية فعلية؟ (R6) |
 | `installments` | `Installment[]?` | array<map> | ✖ | |
 | `settlementCount` | `number` | number | ✔ | |
@@ -620,14 +666,33 @@ users/{uid}                                  ← مستند جذر (غير مك�
 | `backingAccountId` | `string?` | string | ✖ | `mode=='backedAccount'` |
 | `earmarkAccountId` | `string?` | string | ✖ | `equity.earmark.goal.{id}` |
 | `earmarkSourceAccountId` | `string?` | string | ✖ | الحساب النقدي الذي يُحتسب عليه الحجز |
-| `savedMinor` | `number (Minor)` | number | ✔ | مشتق مخزَّن، `>= 0` (I21) |
-| `targetDate` | `DateKey?` | string | ✖ | |
+| `savedMinor` | `number (Minor)` | number | ✔ | مشتق مخزَّن، `>= 0`. **مصدره يختلف بحسب `mode` — انظر التحذير أدناه** |
+| `savedSource` ➕ | `enum` | string | ✔ | `ledgerEarmark` (عند `virtualEarmark`) \| `accountBalance` (عند `backedAccount`) — **يُكتب مرة واحدة عند الإنشاء ولا يُغيَّر** |
+| `targetDate` | `DateKey \| null` | string/null | ✔ | **`null` صريح** لأن `FG1` يُرتَّب عليه؛ الحقل الغائب لا يُفهرس ⇒ هدف بلا موعد كان **يختفي** من Q12 |
 | `priority` ➕ | `1 \| 2 \| 3` | number | ✔ | لترتيب البطاقات |
 | `status` | `enum` | string | ✔ | `active \| achieved \| paused \| cancelled` |
 | `notes` | `string?` | string | ✖ | |
 
 **لا مجموعة `goalContributions`:** المساهمات = `journalEntries where refs.goalId == id`.
 **تنبيه واجهة إلزامي** في `virtualEarmark`: «مخصص دفترياً، والمال لا يزال في حسابك».
+
+> **تحذير معالَج — `savedMinor` في وضع `backedAccount` لا مصدر له في الدفتر.**
+> العقد 4.8 ينصّ على أن وضع `backedAccount` يعني «مال محوَّل فعلاً إلى حساب توفير،
+> **التقدم = رصيد الحساب، ولا قيد خاص**». ومعنى ذلك أن **لا قيد واحد يحمل
+> `refs.goalId`** لهذا الهدف. وكان جدول 11.2 و11.4 يقول إن `savedMinor` «يُعاد بناؤها من قيود
+> `earmark`» ⇒ أول إعادة بناء كانت **تُصفّر تقدّم كل هدف من نوع `backedAccount`** وتُظهر
+> «0 من 20,000 د.ل» لهدف مكتمل، **وثابت I21 لا يكشفه لأنه مقصور على `virtualEarmark`**.
+>
+> **المعتمد:**
+> 1. `mode == 'virtualEarmark'` ⇒ `savedMinor` مُجمَّع من قيود `earmark`، ويُعاد بناؤه، ويحميه I21.
+> 2. `mode == 'backedAccount'` ⇒ `savedMinor` **مرآة لرصيد `backingAccountId`**:
+>    تُحدَّث في **نفس معاملة** أي قيد يمسّ ذلك الحساب (الحساب مقروء في المعاملة أصلاً)،
+>    وإعادة البناء تكتبها **من `accounts/{backingAccountId}.balanceMinor` المُعاد بناؤه**،
+>    لا من قيود `refs.goalId`.
+> 3. **ثابت جديد مقترح I21b** (سؤال مالك #17): لكل هدف `backedAccount`:
+>    `savedMinor === accounts/{backingAccountId}.balanceMinor` ⇒ انحرافه يُكشف بقراءة واحدة.
+> 4. حساب دعم واحد **لا يُشارَك بين هدفين** (وإلا صار نفس المال تقدّماً مزدوجاً) ⇒
+>    قيد نطاق: `backingAccountId` فريد على مستوى الأهداف النشطة.
 
 ### 4.13 `recurrences/{recurrenceId}` — قوالب التكرار
 
@@ -798,9 +863,10 @@ users/{uid}                                  ← مستند جذر (غير مك�
 | `display.hijriOffsetDays` | `number` | number | ✔ | −2..+2، تصحيح يدوي |
 | `display.firstDayOfWeek` | `number` | number | ✔ | 0..6 (6 = السبت) |
 | `fiscalMonthStartDay` | `number` | number | ✔ | 1..28. **معروض ومعطَّل في الإصدار الأول** (ADR-008) ومعلَّم بذلك في الواجهة |
-| `defaults.expenseAccountId` | `string \| null` | string/null | ✔ | الحساب الافتراضي للصرف |
-| `defaults.incomeAccountId` | `string \| null` | string/null | ✔ | |
-| `defaults.expenseCategoryId` | `string \| null` | string/null | ✔ | |
+| `defaults.payFromAccountId` | `string \| null` | string/null | ✔ | **أُعيدت التسمية من `defaults.expenseAccountId`** (غموض مُزال): الاسم القديم يقرؤه المبرمج «حساب المصروف» أي حساب الفئة، بينما المقصود **الحساب الأصل الذي يُدفع منه** (`asset`, `isCashLike`). الاسم الجديد لا يُقرأ إلا بمعنى واحد. **قيد:** `type=='asset' && isPostable && status=='active'` |
+| `defaults.receiveIntoAccountId` | `string \| null` | string/null | ✔ | **أُعيدت التسمية من `defaults.incomeAccountId`** لنفس السبب: حساب الاستلام (`asset`) لا حساب مصدر الدخل |
+| `defaults.expenseCategoryId` | `string \| null` | string/null | ✔ | فئة المصروف الافتراضية (`categories` بـ `kind=='expense'`) |
+| `defaults.incomeCategoryId` ➕ | `string \| null` | string/null | ✔ | فئة الدخل الافتراضية (`categories` بـ `kind=='income'`) — مُقابل متماثل للحقل أعلاه |
 | `budgets.defaultAlertAtPercent` | `number` | number | ✔ | افتراضي 80 (سؤال مالك #13) |
 | `recurrence.maxBackfillDays` | `number` | number | ✔ | افتراضي 120 (سؤال مالك #12) |
 | `notifications.channels` | `{ inApp: boolean; webPush: boolean }` | map | ✔ | **لا `fcmPush`** (ق-1) |
@@ -810,13 +876,43 @@ users/{uid}                                  ← مستند جذر (غير مك�
 | `worship.quranDailyTargetPages` | `number` | number | ✔ | 0 = بلا هدف |
 | `worship.athkarEnabled` | `boolean` | boolean | ✔ | |
 | `worship.remindersEnabled` | `boolean` | boolean | ✔ | «تذكيرات العبادات الاختيارية» (المتطلب 17) |
+| `worship.location` ➕ | `{ cityAr: string; latitude: number; longitude: number; elevationMeters: number } \| null` | map/null | ✔ | **ثغرة مُعالَجة:** القسم 7.1 كان يقول إن مواقيت الصلاة «تُحسب في العميل من إحداثيات المدينة وطريقة الحساب **المخزَّنة في `settings/app.worship`**» — و**هذه الحقول لم تكن موجودة في هذا الجدول إطلاقاً** ⇒ وعد بلا مصدر بيانات (مخالفة المتطلب 25 بند 5). `null` ⇒ ميزة المواقيت **معطَّلة في الواجهة** ولا تُعرض أوقات تقديرية (المتطلب 15.1: «دون أوقات ثابتة أو تقديرية غير موثوقة») |
+| `worship.calcMethod` ➕ | `enum \| null` | string/null | ✔ | `MWL \| UmmAlQura \| Egyptian \| Karachi \| ISNA \| custom` — **تُعرض للمستخدم باسمها** مع ملاحظة أنها طريقة حساب مُعلنة لا فتوى |
+| `worship.asrMethod` ➕ | `enum` | string | ✔ | `standard \| hanafi` |
+| `worship.highLatitudeRule` ➕ | `enum` | string | ✔ | `none \| middleOfNight \| seventhOfNight \| twilightAngle` — ليبيا لا تحتاجها، والحقل موجود لئلا يُكسر السفر |
+| `worship.manualOffsetsMinutes` ➕ | `Record<PrayerName, number>` | map | ✔ | −30..+30 لكل صلاة — تصحيح يدوي مُعلَن، **مُستثنى من الفهرسة** |
 | `privacy.hideAmountsUntilTap` | `boolean` | boolean | ✔ | إخفاء المبالغ على الشاشة |
 | `privacy.requireConfirmOnDelete` | `boolean` | boolean | ✔ | المتطلب 3 |
+| `security.reauthOnSensitiveActionDays` ➕ | `number` | number | ✔ | «إعدادات الأمان» و«إدارة الجلسات» (المتطلبان 20 و21): بعد هذه المدة تُطلب إعادة مصادقة Google قبل التصدير/الاستعادة/الإقفال. `0` = لا إعادة مصادقة |
+| `security.knownDevices` ➕ | `Array<{ deviceId: string; labelAr: string; firstSeenAt: Timestamp; lastSeenAt: Timestamp; revoked: boolean }>` | array<map> | ✔ | **ثغرة مُعالَجة:** المتطلب 20 يسمّي «إدارة الجلسات» ولم يكن لها أي مكان في المخطط. **سقف 20 عنصراً**، و**مُستثنى من الفهرسة**. **حدّ صدق مُعلَن:** `revoked` **لا يُبطل جلسة Firebase فعلياً** (إبطال الرمز يحتاج Admin SDK ⇒ Blaze) — أثره: الجهاز الموسوم يُعرض بوسم «مُلغى» ويُمنع في طبقة التطبيق، لا في القواعد. **لا نَعِد المستخدم بأكثر من ذلك** |
 | `backup.exportReminderEveryDays` | `number` | number | ✔ | افتراضي 14 (ق-1) |
 | `integrity.autoReconcileEveryDays` | `number` | number | ✔ | افتراضي 30 (العقد 16.1) |
+| `dateKeySource` ➕ | `'profileTimeZone'` | string | ✔ | **ثابت، لا خيار.** حسم غموض: `DateKey` **يُحسب دائماً من `profile.timeZone`** لا من منطقة الجهاز — انظر التحذير أدناه |
 
 **محرَّم:** أي مفتاح في `settings` يغيّر **معنى** بيانات مخزَّنة (مثل تغيير العملة أو عدد خانات
 التخزين أو `periodKey`). الإعدادات هنا **عرضية وتشغيلية فقط**.
+
+> **غموض مُحسَم — من أين يأتي `DateKey` بالضبط؟**
+> العقد يقول «`YYYY-MM-DD` بتوقيت المستخدم **المحلي**»، و`profile.timeZone` موصوف بأنه
+> «**مصدر `DateKey` المحلي**». الجملتان لا تتفقان متى اختلفت منطقة الجهاز عن
+> `profile.timeZone`، ومبرمج لا يستطيع التنفيذ دون تخمين. والأثر ليس تجميلياً:
+> `bookedAt` يحدد `periodKey` (I18) ويحدد **الشهر** الذي يُحسب فيه المصروف، ويحدد
+> `occurrenceKey` في المعرّفات الحتمية للتكرار.
+>
+> **القرار المُلزِم:** `DateKey` **يُحسب دائماً من `profile.timeZone`** (`Africa/Tripoli` افتراضاً،
+> وهي UTC+2 بلا توقيت صيفي ⇒ لا التواء مرتين في السنة)، **لا من منطقة الجهاز إطلاقاً**،
+> ولا من `new Date().toISOString().slice(0,10)` (الذي يعطي تاريخ UTC — خطأ شائع يُنتج
+> **قيد الساعة 01:00 ليلاً في شهر سابق**). دالّة واحدة في النظام:
+> `dateKeyNow(tz = profile.timeZone)` و`dateKeyOf(instant, tz)`، وتُفرض حدودها بأداة البناء.
+>
+> **حالة الجهاز المسافر:** إن اختلفت منطقة الجهاز عن `profile.timeZone` بأكثر من ساعتين،
+> تُعرض **ملاحظة واحدة غير حاجبة**: «تواريخ العمليات تُسجَّل بتوقيت طرابلس. اليوم عندك
+> 2026-10-09 وفي طرابلس 2026-10-10.» ولا تُغيَّر المنطقة تلقائياً، وتغييرها إجراء صريح
+> يُسجَّل في `auditLogs` بفعل `settingsChanged` — لأنه **يغيّر معنى كل `DateKey` يُكتب بعده**.
+>
+> **حدّ صدق مُعلَن:** تغيير `profile.timeZone` **لا يُعيد ترقيم أي قيد سابق** (القيد غير قابل
+> للتغيير)، فتبقى قيود ما قبل التغيير على المنطقة القديمة. ولهذا لا يُقترح التغيير في الواجهة
+> ويُعرض كإعداد متقدم بتحذير.
 
 ### 5.3 `settings/dashboard` — تخصيص لوحة التحكم
 
@@ -1106,8 +1202,27 @@ worshipToday | integrityStatus`
 | `deletedAt` / `deletedBy` | — | — | ✔ | |
 
 **ممنوع:** حقل `isOverdue` مخزَّن. التأخّر **دالّة في الوقت**، وتخزينه يحتاج كتابة يومية على كل
-مهمة متأخرة ويُنتج حالة كاذبة إن لم تُشغَّل. الاستعلام
-`status in ['open','inProgress'] && dueDate < today` يعطيه مجاناً.
+مهمة متأخرة ويُنتج حالة كاذبة إن لم تُشغَّل.
+
+> **تصحيح قاتل في الاستعلام المقترح سابقاً.** كانت هذه الفقرة تقول إن
+> `status in ['open','inProgress'] && dueDate < today` «يعطيه مجاناً». **هذا خطأ.**
+> `dueDate` نوعه `DateKey | null` و«`null` = مهمة بلا موعد» (بنصّ الجدول أعلاه)، وFirestore
+> **يرتّب `null` قبل كل نص** ⇒ `dueDate < '2026-10-09'` **يُرجع كل مهمة بلا موعد**.
+> النتيجة الملموسة: قائمة «المهام المتأخرة» ولوحة التحكم تعرضان **كل مهمة بلا موعد**
+> على أنها متأخرة — وهو خرق مباشر للمتطلب 14 ولمنع «البيانات الوهمية» (المتطلب 25 بند 4).
+>
+> **الشكل الصحيح المُلزِم (ويخدمه نفس الفهرس `TA1`):**
+> ```ts
+> const MIN_DATE_KEY = '0001-01-01';   // domain/time/keys.ts — ثابت واحد في النظام
+> where('status','in',['open','inProgress'])
+>   .where('dueDate','>=', MIN_DATE_KEY)   // ← يستبعد null بنيوياً
+>   .where('dueDate','<',  todayKey)
+>   .orderBy('dueDate','asc')
+> ```
+> **القاعدة الجامعة** المستخرَجة من هذا العيب مكتوبة في 9.1(د) وتنطبق على **كل** حقل
+> `DateKey | null` في المخطط: `tasks.dueDate`, `debts.expectedSettleAt`,
+> `debts.nextFollowUpDate`, `incomeSchedules.nextExpectedDate`, `notifications.validUntil`,
+> `financialGoals.targetDate`, `reminders.atDate`, `reminders.endDate`.
 
 ### 6.4 `taskLists/{listId}` — قوائم المهام
 
@@ -1141,7 +1256,8 @@ worshipToday | integrityStatus`
 | `interval` | `number` | number | ✔ | |
 | `endDate` | `DateKey \| null` | string/null | ✔ | |
 | `leadDays` | `number` | number | ✔ | `relativeToDue`: 0 = يوم الاستحقاق، 3 = قبله بثلاثة |
-| `nextFireAt` | `DateKey` | string | ✔ | **مشتق مخزَّن ومفهرس** — عمود الاستعلام الوحيد |
+| `nextFireAt` | `DateKey` | string | ✔ | **مشتق مخزَّن ومفهرس** — عمود الاستعلام الوحيد. **غير قابل لـ `null`** (تذكير بلا موعد إطلاق لا معنى له؛ المُعطَّل يُوسَم `status:'paused'`) |
+| `nextFireAtTs` ➕ | `Timestamp` | timestamp | ✔ | **غموض مُحسَم:** `nextFireAt` تاريخ بلا وقت و`atTime` منفصل ⇒ المُولِّد (Q78) كان سيُطلق تذكيراً موعده **20:00** عند فتح التطبيق **08:00** من اليوم نفسه، ولأن مفتاح الإشعار `reminder:{id}:{fireDateKey}` **يومي** فلن يُعاد إطلاقه في وقته الصحيح أبداً. المعتمد: حقل زمني دقيق = (`nextFireAt` + `atTime`) مُحوَّلاً من `profile.timeZone`، والمُولِّد يستعلم عليه بـ `nextFireAtTs <= now` ⇒ **لا إطلاق مبكّر ولا إطلاق فائت** |
 | `lastFiredKey` | `DateKey \| null` | string/null | ✔ | للعرض؛ منع التكرار بمعرّف الإشعار لا بهذا الحقل |
 | `channels` | `{ inApp: true; webPush: boolean }` | map | ✔ | `inApp` دائماً `true` (ق-1) |
 | `status` | `enum` | string | ✔ | `active \| paused \| done \| cancelled \| deleted` |
@@ -1202,6 +1318,41 @@ integrityAlert | backupReminder | syncRejected | nearDuplicate | userNote`
 > ولأن المُولِّد يفحص `exists(notifications/{dedupeKey})` ويتوقف، فبقاء المستند **هو** آلية
 > منع التكرار. لذلك: الحذف مقصور على `createdBy == 'user'`، والإخفاء للباقي بـ `read` و
 > `validUntil`. (قواعد العقد 14.3 تسمح بالحذف عموماً ⇒ **سؤال مالك #8** لتقييدها.)
+
+#### 6.6.1 ثلاث عيوب في هذه المجموعة — مُعالَجة
+
+**(1) تناقض صريح: استعلام «تنظيف» مقابل سياسة «لا حذف».**
+كان `Q82` موصوفاً بأنه «تنظيف» (`notifications where validUntil < today`) بينما القسم 12.1
+والفقرة أعلاه **يمنعان حذف الإشعارات النظامية**، فلا يبقى للاستعلام ما يفعله. **المعتمد:**
+`Q82` ليس تنظيفاً بل **مرشّح إخفاء** يُحدِّد ما لا يُعرض في مركز التنبيهات، وقد أُعيد تسميته
+في القسم 9 إلى «الإشعارات المنتهية — للإخفاء لا للحذف». والحذف النهائي الوحيد المسموح هو
+`createdBy == 'user'`.
+
+**(2) `validUntil < today` كان يُرجع كل إشعار دائم.**
+`validUntil` نوعه `DateKey | null`، و`null` **يسبق كل نص** في ترتيب Firestore ⇒ الاستعلام
+كان يصنّف **كل إشعار بلا تاريخ انتهاء** (أي كل إشعار دائم: اختلال سلامة، رفض مزامنة،
+تجاوز ميزانية) على أنه «منتهٍ» ⇒ **تختفي أهم التنبيهات من المركز**. الشكل الصحيح:
+`where('validUntil','>=',MIN_DATE_KEY).where('validUntil','<',todayKey)` — انظر 9.1(د) أدناه.
+
+**(3) نموّ غير محدود لإشعارات التأخّر — سقف إلزامي.**
+قالب `oblOverdue:{obligationId}:{YYYY-MM-DD}` يُنتج **مستنداً لكل يوم تأخير لكل التزام**:
+التزام متأخر 90 يوماً = 90 مستنداً، وخمسة التزامات = 450، **ولا شيء يحذفها** (الفقرة أعلاه).
+وأسوأ من الحجم: المُولِّد يفحص `exists()` لكل مفتاح محتمل ⇒ **كل فتحة تطبيق تدفع قراءة لكل
+يوم تأخير لكل التزام**، وهو نموّ خطّي في تكلفة الفتح على Spark بلا أي مقابل للمستخدم
+(تنبيه «متأخر» في اليوم 47 لا يحمل معلومة جديدة). **وهذا بعينه ما يمنعه المتطلب 17:
+«منع التنبيهات المكررة وغير الضرورية».**
+
+**السقف المعتمد (تصاعد مُعلَن لا تنبيه يومي):** يُنبَّه عن التأخّر في الأيام
+`1, 3, 7, 14, 30` ثم **كل 30 يوماً**، بقالب معرّف
+`oblOverdue:{obligationId}:{dueDate}:d{n}` حيث `n ∈ {1,3,7,14,30,60,90,…}`.
+فيصير أقصى عدد لالتزام متأخر سنة كاملة **16 مستنداً** بدل 365، وعدد فحوص `exists()` عند الفتح
+**واحداً فقط** (للعتبة المستحقة اليوم، تُحسب حسابياً من `dueDate` بلا بحث). ونفس السقف
+ينطبق على `taskOverdue:{taskId}:{YYYY-MM-DD}` ⇒ `taskOverdue:{taskId}:d{n}`.
+
+**وسقف صلب ثانٍ:** `notifications` بعد 24 شهراً تُنقل إلى حالة `archivedAt != null` وتُستبعد من
+كل استعلام، **ويُسمح بحذفها النهائي بقرار صريح من المستخدم بعد ذلك** — لأن إشعاراً عمره
+سنتان لا يمنع تكراراً لحدث انتهى، فمفتاحه الحتمي لم يعد يحمل أي قيمة. (**سؤال مالك #8**
+يغطّي هذا التقييد في القواعد.)
 
 ---
 
@@ -1723,7 +1874,7 @@ erDiagram
 | `debts.counterpartyName` | `contacts.name` | **لا** | **نكرّر كلقطة تاريخية مُعلَنة** | **استثناء مُبرَّر:** الدين كيان قانوني/اجتماعي، وتصديره وطبعه يجب أن يحمل الاسم كما كان وقت النشوء. **الاتساق:** الشاشات الحالية تعرض الاسم من `contacts` (انضمام رخيص: جهة واحدة)، والتصدير والسجل التاريخي يعرضان اللقطة. وإجراء صيانة اختياري «إعادة مزامنة الأسماء» يحدّث اللقطات ويكتب `auditLogs: 'contactRenamePropagated'` ⇒ **التغيير مرئي ومقصود لا صامت** |
 | `obligations.nameLower` / `contacts.nameLower` / `notes.titleLower` | الاسم نفسه | لا | **نكرّر داخل نفس المستند** | لا انحراف ممكن: يُكتبان في **نفس** عبارة الكتابة من **نفس** القيمة، ويُفرضان في النطاق. الغرض: فرز وبحث بادئة بلا حساسية حالة |
 | `obligations.remainingMinor` / `debts.remainingMinor` | `total + extra − paid` | — | **مشتق مخزَّن** | **القواعد تفرض المعادلة حرفياً** (I5, I6) ⇒ لا يمكن حفظ قيمة مخالفة. والفحص في المعاملة **يُعيد حسابه من الأطراف** ولا يقرأ المخزَّن |
-| `obligations.isOpen` / `debts.isOpen` ➕ | `remainingMinor > 0` | — | **مشتق مخزَّن** | يُكتب في نفس العبارة، ويُقترح فرضه في القواعد: `isOpen == (remainingMinor > 0)` ⇒ **لا انحراف ممكن**. الغرض: الفهرسة (9.1) |
+| `obligations.isOpen` / `debts.isOpen` ➕ | `remainingMinor > 0` **مع استبعاد الحالات المنتهية** | — | **مشتق مخزَّن** | يُكتب في نفس العبارة، ويُفرَض في القواعد بالصيغة الكاملة من 4.5/4.6 و9.1(أ): `obligations` ⇒ `(remainingMinor > 0 && status != 'cancelled')`، و`debts` ⇒ `(remainingMinor > 0 && !(status in ['cancelled','writtenOff']))` ⇒ **لا انحراف ممكن**. الغرض: الفهرسة (9.1) |
 | `debts.lastFollowUpAt` / `nextFollowUpDate` ➕ | آخر مستند في `followUps` | — | **مرآة مخزَّنة** | تُكتب في نفس `writeBatch` مع المتابعة. الغرض: استعلام «مواعيد المتابعة هذا الأسبوع» بلا `collectionGroup` على مجموعة فرعية. الانحراف المحتمل: متابعة كُتبت والمرآة لا ⇒ تُكشف في شاشة الدين (أحدث متابعة ظاهرة) وتُصلَح بزر «تحديث» |
 | `periods.householdExpenseMinor` | مجموع فرعي من `totalExpenseMinor` | — | **مُجمَّع** | القواعد تفرض `<= totalExpenseMinor` (I15)، ووسم `household` له **مسار تعديل خاص** يُحدِّث المُجمَّع في نفس المعاملة (العقد 8.2) |
 | `worshipRecords.summary` / `quranProgress.summary` | `days` **في نفس المستند** | — | **مُجمَّع داخلي** | **أقوى حالة ممكنة:** الأصل والمشتق في مستند واحد ⇒ يُحدَّثان في كتابة ذرّية واحدة دائماً، **ولا انحراف عبر المستندات ممكن أصلاً**، وإعادة البناء محلية بلا قراءة أي مستند آخر |
@@ -1773,7 +1924,7 @@ postings التاريخية تحمل **قيمة قديمة**، وأي تقرير
 و`meta/*` (قراءة بالمعرّف). كل تصفية وفرز وتجميع فرعي عليها يحدث **في الذاكنة بصفر قراءات
 إضافية** — ولذلك لا نُنشئ لها فهارس إلا ما يطلبه العقد صراحةً.
 
-### 9.1 ثلاثة قيود Firestore اكتُشفت عند اشتقاق الفهارس
+### 9.1 قيود Firestore المكتشفة عند اشتقاق الفهارس (أ…و)
 
 **(أ) `where remainingMinor > 0 order by dueDate` غير قابل للتنفيذ.**
 Firestore يشترط أن يكون **أول فرز على حقل المتباينة**. فالاستعلام الذي يذكره البند 15.5 من
@@ -1782,12 +1933,20 @@ Firestore يشترط أن يكون **أول فرز على حقل المتباي�
 `orderBy('remainingMinor').orderBy('dueDate')` — أي **فرز الالتزامات حسب المبلغ المتبقي أولاً**،
 وهو عكس المطلوب تماماً («الالتزامات القادمة/المتأخرة مرتَّبة بتاريخ الاستحقاق»، المتطلب 4).
 
-**العلاج المعتمد:** حقل بولياني مشتق `isOpen = remainingMinor > 0` يُكتب في **نفس عبارة
-الكتابة** التي تكتب `remainingMinor` (⇒ لا انحراف ممكن)، ويُقترح فرضه في القواعد بـ
-`request.resource.data.isOpen == (request.resource.data.remainingMinor > 0)`.
-فيصير الاستعلام `where isOpen == true && dueDate <= X order by dueDate ASC` — **متباينة واحدة
-على حقل الفرز نفسه** ⇒ صحيح ورخيص. ونُبقي فهرس `(remainingMinor, dueDate)` كما يطلبه العقد
-لأنه يخدم «الأكبر متبقياً أولاً» في شاشة الالتزامات. **(سؤال مالك #1)**
+**العلاج المعتمد:** حقل بولياني مشتق `isOpen` يُكتب في **نفس عبارة الكتابة** التي تكتب
+`remainingMinor` (⇒ لا انحراف ممكن)، **وصيغته الوحيدة المعتمدة هي صيغة جدولَي 4.5 و4.6 حرفياً**
+(تصحيح اتساق: كانت هذه الفقرة تكتبها `remainingMinor > 0` وحدها، فيظهر التزام **مُلغى** برصيد
+متبقٍّ في «الالتزامات القادمة»):
+
+```
+obligations: isOpen == (remainingMinor > 0 && status != 'cancelled')
+debts:       isOpen == (remainingMinor > 0 && !(status in ['cancelled','writtenOff']))
+```
+
+وتُفرَض كما هي في القواعد. فيصير الاستعلام `where isOpen == true && dueDate <= X order by dueDate ASC`
+— **متباينة واحدة على حقل الفرز نفسه** ⇒ صحيح ورخيص. ونُبقي فهرس `(remainingMinor, dueDate)`
+كما يطلبه العقد لأنه يخدم «الأكبر متبقياً أولاً» في شاشة الالتزامات.
+**(سؤال مالك #1 — و`isOpen` غير موجود في عقد النواة §4.5/§4.6 ⇒ يحتاج ADR قبل أي كود.)**
 
 **(ب) `status == 'posted' && kind != 'reversal'` غير قابل للفهرسة مع `order by bookedAtTs`.**
 `!=` متباينة ⇒ أول فرز يجب أن يكون على `kind`. الشكل المكافئ القابل للفهرسة والمعتمد:
@@ -1809,6 +1968,44 @@ where('status','==','posted')
 `postings`، التي تحمل `categoryId` و`contactId` و`accountType` و`tags` و`periodKey` و
 `bookedAtTs` حقولاً قياسية. والـ posting يحمل كل ما يُعرض في الصف (المبلغ، التاريخ، الحساب،
 النوع)، و`entryId` للتفصيل عند النقر ⇒ **قراءة واحدة لكل صف، بلا انضمام**.
+
+**(د) المتباينة على حقل قابل لـ `null` تُرجع مستندات `null` أيضاً.**
+ترتيب Firestore بين الأنواع يضع `null` **قبل كل نص** ⇒ `where('dueDate','<',today)` يُرجع
+المهام بلا موعد، و`where('nextFollowUpDate','<=',today+7)` يُرجع الديون بلا موعد متابعة،
+و`where('validUntil','<',today)` يُرجع كل إشعار دائم.
+**القاعدة الجامعة المُلزِمة:** كل استعلام متباينة على حقل نوعه `DateKey | null` يحمل **حدّاً أدنى
+صريحاً** في نفس الاستعلام: `.where(f,'>=',MIN_DATE_KEY)` حيث `MIN_DATE_KEY = '0001-01-01'`.
+الحقول المعنية: `obligations.dueDate`، `debts.expectedSettleAt`، `debts.nextFollowUpDate`،
+`tasks.dueDate`، `financialGoals.targetDate`، `incomeSchedules.nextExpectedDate`،
+`notifications.validUntil`. **ولا يُضاف أي حقل إلى الفهرس** — الحدّان على نفس الحقل.
+
+**(هـ) `sum()` يحتاج الحقل المُجمَّع **داخل** الفهرس.**
+فكل استعلام تجميعي مُصفّى يحتاج فهرساً ينتهي بالحقل المجموع. وكانت هذه الوثيقة تستثني من
+الفهرسة أربعة حقول تبني عليها ثوابتها في الوقت نفسه:
+
+| الحقل المستثنى (خطأً) | الثابت/الاستعلام الذي يُسقطه |
+|---|---|
+| `postings.signedAmountMinor` | I11، Q38، Q61، Q62، R-I1، R-I2، M-I6 — **كل تقرير تجميعي** |
+| `postings.settlementDeltaMinor` | I5b (Q48) و I6b (Q55) |
+| `postings.isCashLike` | R-I5 في `08-reports.md` (جسر التدفق النقدي) |
+| `journalEntries.accountTypes` | R05/R06 «بالنوع» — والعقد §4.3 يعرّف الحقل «لتصفية التقارير» |
+
+**العلاج المنفَّذ:** حُذفت الاستثناءات الأربعة، وأُضيفت **11 فهرس تجميع** ينتهي كل منها بالحقل
+المجموع، **و5 فهارس صفوف/نطاقات**، وأُلحق الحقل المجموع بخمسة فهارس نطاق قائمة
+(`accountId|accountType|categoryId|contactId + bookedAt` و`goalId + bookedAtTs`) فصار الفهرس
+الواحد يخدم **الصفوف والتجميع معاً** بقاعدة السابقة (prefix). وحُذف فهرسان صارا سابقةً لفهرس
+تجميع يغنيان عنه. التفصيل في 10.1 و10.2.
+**وقاعدة التكلفة لا تنكسر:** `sum` يُحاسَب `⌈n/1000⌉` قراءة بحدّ أدنى 1، لا قراءتين ثابتتين
+(`06-module-map.md` §14/ر-12) — وهو ما تعتمده كل تقديرات هذه الوثيقة.
+
+**(و) `postings` غير قابلة للتعديل ⇒ `entryStatus` تتجمّد فيها.**
+العقد §4.4 ينصّ: «لقطة حالة القيد عند الكتابة. **لا تُحدَّث** عند العكس». فقائمة مصروفات مبنية
+على `postings` تُظهر المصروف الملغى **وقيد عكسه** صفّين اثنين، وهذا يخالف العقد §8.6.
+**العلاج المعتمد:** **لا مرشّح على `entryStatus` في أي استعلام** (قيمته كاذبة بعد العكس)، بل:
+(1) `entryKind != 'reversal'` يُطبَّق **محلياً** على الصفحة المُحمَّلة، و(2) مرشّح محلي على
+`entryCorrections` (مجموعة صغيرة مُحمَّلة باللقطة، معرّفها هو معرّف القيد الأصلي) يُخفي الأصل
+المُصحَّح. **والمجاميع لا تتأثر إطلاقاً**: `sum(signedAmountMinor)` يتصافر تلقائياً مع قيد العكس
+(العقد §4.4) ⇒ **تصفية الحالة في التجميع خطأ يُضاعف الخطأ**.
 
 ### 9.2 لوحة التحكم (المتطلب 4)
 
@@ -1846,7 +2043,7 @@ where('status','==','posted')
 | Q23 | `postings where categoryId==X && bookedAt >= a && bookedAt <= b order by bookedAt asc` | `PO7` |
 | Q24 | `postings where accountType=='expense' && bookedAt >= a && bookedAt <= b order by bookedAt asc` | `PO5` |
 | Q25 | `postings where accountId==A && bookedAt >= a && bookedAt <= b order by bookedAt asc` | `PO1` |
-| Q26 | `postings where periodKey==pk && tags array-contains 'household' order by bookedAtTs desc` (شاشة المنزل، المتطلب 11) | `PO8` |
+| Q26 | `postings where periodKey==pk && accountType=='expense' && tags array-contains 'household' order by bookedAtTs desc` (شاشة المنزل، المتطلب 11). **`accountType` شرط صحة لا تحسين:** وسوم القيد تُنسخ على **كل** سطوره ⇒ التصفية بالوسم وحده تُرجع `sum(signedAmountMinor) == 0` دائماً (`06-module-map.md` §5.4/ر-2 و M-I19) | `PO8` |
 | Q27 | `postings where contactId==X && bookedAt >= a order by bookedAt asc` (كشف جهة) | `PO13` |
 | Q28 | `postings where accountType=='expense' && periodKey==pk order by amountMinor desc limit 25` (الأعلى مبلغاً) | `PO14` |
 | Q29 | `postings where entryKind=='obligationPayment' && periodKey==pk order by bookedAtTs desc` | `PO15` |
@@ -1960,7 +2157,7 @@ where('status','==','posted')
 | Q99 | `scenarios where status=='active' order by updatedAt desc` | `SC1` |
 | Q100 | `financialGoals where status=='active' order by priority asc, createdAt desc` | `FG2` |
 
-**الإجمالي: 100 استعلام مُسمّى، و79 فهرساً مركَّباً** — وكل فهرس في القسم 10 يحمل في تعليقه
+**الإجمالي: 100 استعلام مُسمّى، و96 فهرساً مركَّباً** — وكل فهرس في القسم 10 يحمل في تعليقه
 أرقام الاستعلامات التي يخدمها، **فلا فهرس بلا مستهلك**.
 
 ---
@@ -1999,7 +2196,7 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
 | `PO5` | postings | accountType, bookedAt↑ | Q24 |
 | `PO6` | postings | categoryId, periodKey, bookedAtTs↓ | Q22, Q62 |
 | `PO7` | postings | categoryId, bookedAt↑ | Q23 |
-| `PO8` | postings | periodKey, tags◇, bookedAtTs↓ | Q26 |
+| `PO8` | postings | periodKey, accountType, tags◇, bookedAtTs↓ | Q26 (و M-I6) |
 | `PO9` | postings | periodKey, side | Q63 |
 | `PO10` | postings | obligationId, bookedAtTs↑ | Q48 (I5b) |
 | `PO11` | postings | debtId, bookedAtTs↑ | Q55 (I6b) |
@@ -2055,7 +2252,35 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
 | `AT1` | attachments | linkedTo.docId, createdAt↓ | Q95 |
 | `SC1` | scenarios | status, updatedAt↓ | Q99 |
 
-◇ = `array-contains` · ↑ = تصاعدي · ↓ = تنازلي · **81 فهرساً**.
+**فهارس التجميع والنطاق المضافة في تدقيق الاتساق المالي** (العلّة في 9.1(هـ)):
+
+| الرمز | المجموعة | الحقول | يخدم |
+|---|---|---|---|
+| `AP2` | accountPeriods | periodKey, accountId | `08` R15 — `ΔCash` لكل الحسابات النقدية في فترة |
+| `JE16` | journalEntries | tags◇, periodKey, bookedAtTs↓ | `08` R11 (صفوف المنزل داخل فترة) |
+| `JE17` | journalEntries | periodKey, accountTypes◇, bookedAtTs↓ | `08` R05/R06 «بالنوع» (العقد §4.3) |
+| `PO16` | postings | accountId, accountType, periodKey | `08` R05 لكل مصدر داخل فترة |
+| `PO17` | postings | tags◇, accountType, bookedAt↑, signedAmountMinor | `08` R11 على نطاق جزئي + تجميعه |
+| `PG1` | postings | accountId, signedAmountMinor | **تجميع** Q38 · I11 |
+| `PG2` | postings | accountId, periodKey, signedAmountMinor | **تجميع** `08` §3.8 (الادخار المخصَّص) |
+| `PG3` | postings | periodKey, accountType, signedAmountMinor | **تجميع** Q61 · R-I1 · R-I2 |
+| `PG4` | postings | periodKey, accountType, tags◇, signedAmountMinor | **تجميع** M-I6 (مصاريف المنزل) |
+| `PG5` | postings | periodKey, isCashLike, signedAmountMinor | **تجميع** R-I5 (جسر التدفق النقدي) |
+| `PG6` | postings | categoryId, periodKey, signedAmountMinor | **تجميع** Q62 |
+| `PG7` | postings | contactId, periodKey, signedAmountMinor | **تجميع** `08` R07/R08 |
+| `PG8` | postings | goalId, periodKey, signedAmountMinor | **تجميع** `08` R13 |
+| `PG9` | postings | isCashLike, bookedAt↑, signedAmountMinor | **تجميع** `ΔCash` على نطاق جزئي |
+| `PG10` | postings | periodKey, side, amountMinor | **تجميع** Q63 (بصمة الفترة) |
+| `PG11` | postings | obligationId, settlementDeltaMinor | **تجميع** Q48 · I5b |
+| `PG12` | postings | debtId, settlementDeltaMinor | **تجميع** Q55 · I6b |
+
+**وأُلحق الحقل المُجمَّع بخمسة فهارس نطاق قائمة** (`PO1`, `PO5`, `PO7`, `PO12`, `PO13`) فصار كل
+منها `… + signedAmountMinor` ⇒ **الفهرس الواحد يخدم الصفوف والتجميع معاً** بقاعدة السابقة (prefix).
+**وحُذف فهرسان** صارا سابقةً لفهرس تجميع يغنيان عنه: `PO2` (accountId, periodKey ← `PG2`)
+و`PO9` (periodKey, side ← `PG10`).
+
+◇ = `array-contains` · ↑ = تصاعدي · ↓ = تنازلي · **96 فهرساً** (79 من الجدول الأول بعد حذف
+`PO2` و`PO9`، + 17 من هذا الجدول).
 
 ### 10.2 محتوى الملف
 
@@ -2077,6 +2302,9 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
     { "collectionGroup": "accountPeriods", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "accountId", "order": "ASCENDING" },
       { "fieldPath": "periodKey", "order": "ASCENDING" } ] },
+    { "collectionGroup": "accountPeriods", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "accountId", "order": "ASCENDING" } ] },
 
     { "collectionGroup": "journalEntries", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "accountIds", "arrayConfig": "CONTAINS" },
@@ -2126,13 +2354,19 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
     { "collectionGroup": "journalEntries", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "createdAt", "order": "ASCENDING" },
       { "fieldPath": "__name__", "order": "ASCENDING" } ] },
+    { "collectionGroup": "journalEntries", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "tags", "arrayConfig": "CONTAINS" },
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "bookedAtTs", "order": "DESCENDING" } ] },
+    { "collectionGroup": "journalEntries", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "accountTypes", "arrayConfig": "CONTAINS" },
+      { "fieldPath": "bookedAtTs", "order": "DESCENDING" } ] },
 
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "accountId", "order": "ASCENDING" },
-      { "fieldPath": "bookedAt", "order": "ASCENDING" } ] },
-    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
-      { "fieldPath": "accountId", "order": "ASCENDING" },
-      { "fieldPath": "periodKey", "order": "ASCENDING" } ] },
+      { "fieldPath": "bookedAt", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "accountId", "order": "ASCENDING" },
       { "fieldPath": "bookedAtTs", "order": "DESCENDING" } ] },
@@ -2142,21 +2376,21 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
       { "fieldPath": "bookedAtTs", "order": "DESCENDING" } ] },
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "accountType", "order": "ASCENDING" },
-      { "fieldPath": "bookedAt", "order": "ASCENDING" } ] },
+      { "fieldPath": "bookedAt", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "categoryId", "order": "ASCENDING" },
       { "fieldPath": "periodKey", "order": "ASCENDING" },
       { "fieldPath": "bookedAtTs", "order": "DESCENDING" } ] },
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "categoryId", "order": "ASCENDING" },
-      { "fieldPath": "bookedAt", "order": "ASCENDING" } ] },
+      { "fieldPath": "bookedAt", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "accountType", "order": "ASCENDING" },
       { "fieldPath": "tags", "arrayConfig": "CONTAINS" },
       { "fieldPath": "bookedAtTs", "order": "DESCENDING" } ] },
-    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
-      { "fieldPath": "periodKey", "order": "ASCENDING" },
-      { "fieldPath": "side", "order": "ASCENDING" } ] },
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "obligationId", "order": "ASCENDING" },
       { "fieldPath": "bookedAtTs", "order": "ASCENDING" } ] },
@@ -2165,10 +2399,12 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
       { "fieldPath": "bookedAtTs", "order": "ASCENDING" } ] },
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "goalId", "order": "ASCENDING" },
-      { "fieldPath": "bookedAtTs", "order": "ASCENDING" } ] },
+      { "fieldPath": "bookedAtTs", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "contactId", "order": "ASCENDING" },
-      { "fieldPath": "bookedAt", "order": "ASCENDING" } ] },
+      { "fieldPath": "bookedAt", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "accountType", "order": "ASCENDING" },
       { "fieldPath": "periodKey", "order": "ASCENDING" },
@@ -2177,6 +2413,61 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
       { "fieldPath": "entryKind", "order": "ASCENDING" },
       { "fieldPath": "periodKey", "order": "ASCENDING" },
       { "fieldPath": "bookedAtTs", "order": "DESCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "accountId", "order": "ASCENDING" },
+      { "fieldPath": "accountType", "order": "ASCENDING" },
+      { "fieldPath": "periodKey", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "tags", "arrayConfig": "CONTAINS" },
+      { "fieldPath": "accountType", "order": "ASCENDING" },
+      { "fieldPath": "bookedAt", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "accountId", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "accountId", "order": "ASCENDING" },
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "accountType", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "accountType", "order": "ASCENDING" },
+      { "fieldPath": "tags", "arrayConfig": "CONTAINS" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "isCashLike", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "categoryId", "order": "ASCENDING" },
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "contactId", "order": "ASCENDING" },
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "goalId", "order": "ASCENDING" },
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "isCashLike", "order": "ASCENDING" },
+      { "fieldPath": "bookedAt", "order": "ASCENDING" },
+      { "fieldPath": "signedAmountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "periodKey", "order": "ASCENDING" },
+      { "fieldPath": "side", "order": "ASCENDING" },
+      { "fieldPath": "amountMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "obligationId", "order": "ASCENDING" },
+      { "fieldPath": "settlementDeltaMinor", "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "debtId", "order": "ASCENDING" },
+      { "fieldPath": "settlementDeltaMinor", "order": "ASCENDING" } ] },
 
     { "collectionGroup": "obligations", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "isOpen", "order": "ASCENDING" },
@@ -2359,16 +2650,12 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
   "fieldOverrides": [
     { "collectionGroup": "journalEntries", "fieldPath": "lines", "indexes": [] },
     { "collectionGroup": "journalEntries", "fieldPath": "description", "indexes": [] },
-    { "collectionGroup": "journalEntries", "fieldPath": "accountTypes", "indexes": [] },
     { "collectionGroup": "journalEntries", "fieldPath": "attachmentIds", "indexes": [] },
     { "collectionGroup": "journalEntries", "fieldPath": "payloadHash", "indexes": [] },
     { "collectionGroup": "journalEntries", "fieldPath": "clientCreatedAt", "indexes": [] },
     { "collectionGroup": "journalEntries", "fieldPath": "correctionReason", "indexes": [] },
 
     { "collectionGroup": "postings", "fieldPath": "accountCode", "indexes": [] },
-    { "collectionGroup": "postings", "fieldPath": "isCashLike", "indexes": [] },
-    { "collectionGroup": "postings", "fieldPath": "signedAmountMinor", "indexes": [] },
-    { "collectionGroup": "postings", "fieldPath": "settlementDeltaMinor", "indexes": [] },
     { "collectionGroup": "postings", "fieldPath": "lineNo", "indexes": [] },
 
     { "collectionGroup": "accounts", "fieldPath": "ancestorIds", "indexes": [] },
@@ -2382,7 +2669,9 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
 
     { "collectionGroup": "periods", "fieldPath": "expenseByCategory", "indexes": [] },
     { "collectionGroup": "periods", "fieldPath": "incomeBySource", "indexes": [] },
+
     { "collectionGroup": "budgetPeriods", "fieldPath": "categories", "indexes": [] },
+
     { "collectionGroup": "budgetTemplates", "fieldPath": "categories", "indexes": [] },
 
     { "collectionGroup": "obligations", "fieldPath": "installments", "indexes": [] },
@@ -2396,20 +2685,24 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
     { "collectionGroup": "debts", "fieldPath": "counterpartyName", "indexes": [] },
 
     { "collectionGroup": "recurrences", "fieldPath": "template", "indexes": [] },
+
     { "collectionGroup": "incomeSchedules", "fieldPath": "occurrences", "indexes": [] },
 
     { "collectionGroup": "pendingCommands", "fieldPath": "payload", "indexes": [] },
     { "collectionGroup": "pendingCommands", "fieldPath": "rejectionMessageAr", "indexes": [] },
 
     { "collectionGroup": "notes", "fieldPath": "content", "indexes": [] },
+
     { "collectionGroup": "notifications", "fieldPath": "link", "indexes": [] },
 
     { "collectionGroup": "auditLogs", "fieldPath": "before", "indexes": [] },
     { "collectionGroup": "auditLogs", "fieldPath": "after", "indexes": [] },
+
     { "collectionGroup": "importBatches", "fieldPath": "errors", "indexes": [] },
 
     { "collectionGroup": "worshipRecords", "fieldPath": "days", "indexes": [] },
     { "collectionGroup": "worshipRecords", "fieldPath": "summary", "indexes": [] },
+
     { "collectionGroup": "quranProgress", "fieldPath": "days", "indexes": [] },
     { "collectionGroup": "quranProgress", "fieldPath": "summary", "indexes": [] },
 
@@ -2434,7 +2727,7 @@ JSON لا يقبل التعليقات، فهذه خريطة المستهلكين
 }
 ```
 
-### 10.3 لماذا 59 استثناء فهرسة — وليست تحسيناً اختيارياً
+### 10.3 لماذا 55 استثناء فهرسة — وليست تحسيناً اختيارياً
 
 **الخرائط ذات المفاتيح من صنع المستخدم هي أخطر ما في المخطط من ناحية الفهرسة.**
 Firestore يُفهرس **كل حقل فرعي في الخريطة تلقائياً**. فـ`periods/{pk}.expenseByCategory` بـ200
@@ -2448,7 +2741,14 @@ Firestore يُفهرس **كل حقل فرعي في الخريطة تلقائيا
 | **خرائط بمفاتيح مستخدم** | `expenseByCategory`, `incomeBySource`, `budgetPeriods.categories`, `occurrences`, `days`, `summary` | تجنّب 200–300 مُدخَل فهرس لكل كتابة، وتجنّب حدّ 40,000/مستند |
 | **نصوص طويلة** | `description`, `notes`, `content`, `rejectionMessageAr`, `calculationMethodAr` | حدّ 1,500 بايت لقيمة الحقل المفهرس يرفض النصوص الطويلة أصلاً؛ الاستثناء يمنع فشل الكتابة |
 | **مصفوفات لا نستعلم عليها** | `lines`, `attachmentIds`, `ancestorIds`, `installments`, `entryIds`, `touchedDocIds`, `errors` | مُدخَل فهرس لكل عنصر |
-| **أرقام مالية تُجمَّع ولا تُرشَّح** | `signedAmountMinor`, `settlementDeltaMinor`, `debitTotalMinor`, `creditTotalMinor`, `earmarkedMinor` | التجميع (`sum`) يستخدم فهرس **الاستعلام** لا فهرس الحقل المجموع ⇒ فهرستها إنفاق بلا مقابل، وعلى `accounts` تُدفع **مع كل عملية مالية** |
+| **أرقام مالية لا تُجمَّع خادمياً ولا تُرشَّح** | `accounts.debitTotalMinor`, `creditTotalMinor`, `earmarkedMinor`, `lastVerifiedBalanceMinor` | لا استعلام ولا تجميع خادمي عليها — تُقرأ داخل لقطة `accounts` المحمَّلة أصلاً، وفهرستها تُدفع **مع كل عملية مالية** |
+
+> **تصحيح اتساق (تدقيق مالي):** كانت هذه الخانة تضمّ `postings.signedAmountMinor` و
+> `postings.settlementDeltaMinor` بتبرير: «التجميع (`sum`) يستخدم فهرس **الاستعلام** لا فهرس الحقل
+> المجموع». **هذا التبرير خاطئ**، وهو نفس العيب الذي يرصده القسم 0 بند 5: `sum()` **يحتاج الحقل
+> المُجمَّع داخل الفهرس**. فاستثناؤهما كان يُسقط I5b و I6b و I11 و R-I1 و R-I2 و M-I6 —
+> أي **كل تقرير تجميعي في النظام**. حُذف الاستثناءان، وحُذف معهما `postings.isCashLike`
+> (يُسقط R-I5) و`journalEntries.accountTypes` (يُسقط R05/R06 «بالنوع»). التفصيل في 9.1(هـ).
 | **حقول وصفية مكرَّرة** | `accountCode`, `counterpartyName`, `payloadHash`, `clientCreatedAt` | لا استعلام عليها |
 
 ---
@@ -2998,6 +3298,8 @@ fixture، **ويحدّث هذه الوثيقة في نفس الالتزام (com
 | **13** | **عتبة تنبيه الميزانية الافتراضية 80%** مناسبة؟ | قابلة للضبط لكل فئة |
 | **14** | **سقف محتوى الملاحظة 200,000 حرف، ولا بحث نصي خادمي** لوصف العمليات (9.3 و6.1). | البحث في العمليات يبقى داخل الشهر/الصفحة المُحمَّلة |
 | **15** | **الحذف النهائي بعد 30 يوماً** للملاحظات والمهام (12.1): تلقائي أم بقرار صريح فقط؟ | التلقائي يحتاج تشغيلاً عند الفتح (ممكن على Spark) لكنه **يحذف بيانات بلا تدخل المستخدم** — وهو ما أتجنّبه افتراضياً |
+| **16** 〔تدقيق الاتساق المالي〕 | **بقية الحقول المعلَّمة ➕ وغير الموجودة في عقد النواة §4، ولم تكن مجموعة في هذه القائمة** رغم نصّ مقدّمتها: `debts.nextFollowUpDate` و`debts.lastFollowUpAt` (4.6 من هذه الوثيقة) و`financialGoals.priority` (4.8 من هذه الوثيقة). كلها مفهرسة ويبني عليها استعلامات مُسمّاة (Q51, Q52, Q100) وفهارس منشورة (`DE4`, `DE5`, `FG2`). | **الفهرس يُنشر على حقل لا يعرّفه العقد** ⇒ `DE4` و`FG2` **لا يُرجعان شيئاً** (الحقل الغائب لا يُفهرس) ⇒ شاشة «مواعيد المتابعة» وترتيب بطاقات الأهداف **فارغان بلا رسالة خطأ**. يحتاج **ADR** يضيف الثلاثة إلى §4.6/§4.8 من العقد، أو حذف الاستعلامات والفهارس الثلاثة |
+| **17** 〔تدقيق الاتساق المالي〕 | **المجموعات الشخصية في القسمين 9.8 و10 صدر لها عقد لاحق يخالف أسماء حقولها:** `09-personal-worship.md` يثبّت `worshipDays/{dateKey}` و`quranSessions` (لا `worshipRecords/{pk}` و`quranProgress/{pk}`)، و`tasks.trashed` + `orderKey` (لا `status:'deleted'` + `sortOrder`)، و`notes.trashed` + `archived` (لا `status`)، و`zakatRecords.hawlEndAt` + `assessedAt` (لا `hawlEndDate`). و`07-recurrence-notifications.md` يثبّت `notifications.type` و`createdDateKey`. | **الفهارس الشخصية المنشورة من هذه الوثيقة (`TA*`, `NO*`, `ZK1`, `RM2`) على حقول لا وجود لها** ⇒ كل شاشة مهام/مفكرة/زكاة تفشل بـ `failed-precondition` أو تُرجع فراغاً. الحسم المقترح: **09 و07 هما المرجع لمجموعاتهما**، وتُستبدل صفوفهما في 9.8 و10 بفهارس 09 §12.1 و07 §…، **وهذا تعديل على هذه الوثيقة لا على العقد** |
 
 ### 17.1 ملخص القرارات المرفوضة في هذه الوثيقة
 
@@ -3034,7 +3336,7 @@ fixture، **ويحدّث هذه الوثيقة في نفس الالتزام (com
 | مخطط كيانات Mermaid لكل العلاقات والمراجع | 8.1 + جدول 8.2 |
 | قرارات denormalization وكيف نحافظ على الاتساق | 8.3 + 8.4 + 8.5 |
 | كل استعلام يحتاجه التطبيق (قائمة مرقّمة) | القسم 9 — **100 استعلام** |
-| `firestore.indexes.json` كاملاً بمحتواه الفعلي | 10.2 — **81 فهرساً + 59 استثناء** |
+| `firestore.indexes.json` كاملاً بمحتواه الفعلي | 10.2 — **96 فهرساً + 55 استثناء**، وهو **نفس محتوى `firestore.indexes.json` المنشور** |
 | التجميعات: متى تُحدَّث وكيف تُعاد بناؤها | القسم 11 |
 | الحذف والأرشفة لكل كيان وأثره على التقارير التاريخية | القسم 12 |
 | `auditLogs`: ما يُسجَّل، شكل السجل، من يكتبه | القسم 14 |
@@ -3050,3 +3352,23 @@ fixture، **ويحدّث هذه الوثيقة في نفس الالتزام (com
 > لصالح العقد**، ويُعدّ عيباً في هذه الوثيقة يُصلَح فوراً — إلا الأسئلة 1–9 في القسم 17،
 > فهي **تعارضات حقيقية في العقد نفسه أو في قواعده** تحتاج قراراً لا تصحيحاً.
 
+
+---
+
+> تعديل اتساق (تدقيق مالي): وُحِّدت أسماء الحقول على عقد النواة §4 — و`firestore.indexes.json`
+> المنشور صار **نفس محتوى 10.2 حرفياً** بعد أن كان يستعلم على حقول لا وجود لها في العقد
+> (`postings.reversed`, `postings.scope`, `postings.lineIndex`, `postings.refs.*`,
+> `journalEntries.reversed`, `debts.dueDate`, `auditLogs.targetEntryId`, `auditLogs.beforeAfter`،
+> و`pendingCommands.createdAt` بدل `createdAtClient`)، وكان يحمل 20 فهرساً من 96، **ويُلغي فهرسة
+> `journalEntries.tags` التي يقوم عليها الفهرس `JE14`**. · وأُصلح الاستثناء الفهرسي القاتل:
+> حُذفت استثناءات `postings.signedAmountMinor` و`settlementDeltaMinor` و`isCashLike` و
+> `journalEntries.accountTypes` وأُضيف **17 فهرساً** (11 تجميعياً و5 صفوف/نطاقات وفهرس
+> `accountPeriods: periodKey+accountId`)، وحُذف `PO2` و`PO9` كسابقتين مُغنى عنهما ⇒ **96 فهرساً
+> و55 استثناءً**، ووُحِّدت الأرقام الأربعة المتضاربة (88/81/79 و57/59 و101/100) في القسمين 0 و9.9
+> و10.1 و18. · وأُضيف `accountType` إلى Q26 و`PO8` لأن التصفية بالوسم وحده على `postings` تُرجع
+> صفراً دائماً (`06` §5.4/ر-2 و M-I19). · ووُحِّدت صيغة `isOpen` على صيغة جدولَي 4.5/4.6 بعد أن
+> كانت 9.1(أ) والقسم 8 يكتبانها `remainingMinor > 0` وحدها فيُظهران التزاماً **مُلغى** في
+> «الالتزامات القادمة». · وأُضيفت الأقسام 9.1(د) و(هـ) و(و) التي كانت **مُحال إليها أربع مرات
+> وغير موجودة** (وحُذفت الإحالة إلى 9.1(ز) غير الموجود). · وأُضيف السؤالان 16 و17 إلى القسم 17
+> للحقول المعلَّمة ➕ وغير الموجودة في العقد (`debts.nextFollowUpDate`,
+> `debts.lastFollowUpAt`, `financialGoals.priority`) ولتضارب المجموعات الشخصية مع `09` و`07`.

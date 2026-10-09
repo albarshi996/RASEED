@@ -296,7 +296,7 @@ Cross-Origin-Opener-Policy: same-origin-allow-popups
 
 | في المتطلبات | في التنفيذ | ملاحظة |
 |---|---|---|
-| `profiles` | `settings/profile` | **مستند `users/{uid}` نفسه غير قابل للكتابة** (`allow write: if false` في النواة) ⇒ الملف الشخصي **لا يمكن** أن يسكن هناك. مُوثَّق في 7.5 |
+| `profiles` | **`profile/main`** (مجموعة مستقلة) | **مستند `users/{uid}` نفسه غير قابل للكتابة** (`allow write: if false` في النواة) ⇒ الملف الشخصي **لا يمكن** أن يسكن هناك. و`03-data-model.md` §1.3 و§2.3 يضعانه في **`profile/main`** وينصّان صراحةً على أنه «يحتاج `match /profile/{docId}`». **تصحيح اتساق:** النسخة الأولى من هذا الجدول قالت `settings/profile`، وهو خلاف §6 من هذه الوثيقة نفسها (التي تحتوي `match /profile/{docId}`) وخلاف نموذج البيانات. المسار الرسمي **`profile/main`**، و`settings/profile` يبقى مقبولاً للتوافق فقط ⇒ سؤال مفتوح رقم 9 |
 | `accounts` | `accounts` | كما هو (شجرة الحسابات، النواة 3) |
 | `transactions` | `journalEntries` + `postings` | قيد مزدوج (النواة 1). «الحركة» = `postings` |
 | `categories` | `categories` (+ حساب `expense` 1:1) | النواة 3.4 |
@@ -460,14 +460,37 @@ service cloud.firestore {
       return request.resource.data[f] is list && request.resource.data[f].size() <= n;
     }
 
-    // كل إنشاء يثبّت المالك والنسخة. كل تحديث يجمّدهما مع createdAt.
+    // كل إنشاء يثبّت المالك والنسخة **و`createdAt` بوقت الخادم**. كل تحديث يجمّدها.
+    //
+    // ⚠ إصلاح ع-أمن-5 (عيب أدخلته النسخة الأولى من هذه الوثيقة):
+    //   `ownerFrozen()` كانت تستدعي `unchanged('createdAt')` بينما **لا قاعدة إنشاء واحدة**
+    //   كانت تفرض وجود `createdAt` خارج (journalEntries, followUps, entryCorrections,
+    //   operations, periodLocks, auditLogs, attachments). والوصول إلى مفتاح غائب في
+    //   خريطة داخل لغة القواعد **خطأ تقييم ⇒ رفض**. الأثر: حساب أنشأه سكربت التهيئة بلا
+    //   `createdAt` ⇒ **كل تحديث رصيد عليه مرفوض إلى الأبد** ⇒ أول مصروف يُوقف النظام.
+    //   وهو نفس صنف ع-أمن-1 بالضبط. الإصلاح طبقتان:
+    //   (1) `ownedNew` تفرض `createdAt == request.time` ⇒ الحقل موجود دائماً بعد الآن،
+    //   (2) `ownerFrozen` تُقرأ بـ `get(key, default)` ⇒ **لا خطأ تقييم** على بيانات قديمة.
     function ownedNew(uid) {
       return request.resource.data.ownerUid == uid
           && request.resource.data.schemaVersion is int
-          && request.resource.data.schemaVersion >= 1;
+          && request.resource.data.schemaVersion >= 1
+          && serverTime('createdAt');
     }
     function ownerFrozen() {
-      return unchanged('ownerUid') && unchanged('createdAt');
+      return request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.get('createdAt', null)
+             == resource.data.get('createdAt', null);
+    }
+
+    // حدّ معقول على تاريخ القيد: يمنع ترحيلاً في 2099-12 من جهاز بساعة أو منطقة زمنية
+    // خاطئة (يُنشئ periods/accountPeriods في المستقبل ويُفسد كل نطاق تقرير وإعادة بناء).
+    // النافذة: 10 سنوات للخلف (استيراد تاريخي) و48 ساعة للأمام (فرق المناطق الزمنية ±14h).
+    function bookedAtTsSane(d) {
+      return 'bookedAtTs' in d
+          && d.bookedAtTs is timestamp
+          && d.bookedAtTs.toMillis() - request.time.toMillis() < 172800000
+          && request.time.toMillis() - d.bookedAtTs.toMillis() < 315576000000;
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -479,14 +502,22 @@ service cloud.firestore {
     function integrityDoc(uid) {
       return /databases/$(database)/documents/users/$(uid)/meta/integrity;
     }
-    // نمط آمن: غياب المستند لا يُوقف النظام (النواة 3.3، العيب ع-ج-5)
+
+    // ⚠ إصلاح جزئي لـ ع-أمن-2، **بلا تغيير آلية النواة**:
+    //   النمط القديم `!exists(X) || get(X).data…` = **استدعاءان** لكل مستند.
+    //   `get()` على مستند غير موجود تُعيد `null` ⇒ ربط `let` واحد يكفي ⇒ **استدعاء واحد**.
+    //   الأثر على تقدير 7.3: payObligation من 23 ⇒ 13، و voidTransaction من 21 ⇒ 12
+    //   ⇒ **تحت حدّ 20 بهامش**، وبلا انتظار قرار المالك على ADR-SEC-13.
+    //   ADR-SEC-13 (بوابة بالوجود) يبقى مطروحاً كتحسين إضافي (12 ⇒ 12 هنا، والفارق
+    //   الحقيقي يظهر عند تعدد المستخدمين حيث يُضاف `canWriteIn`). القياس في المحاكي
+    //   (ح-123/ح-124) **يبقى إلزامياً** — الرقم أعلاه تقدير لا قياس.
     function rebuildNotRunning(uid) {
-      return !exists(integrityDoc(uid))
-          || get(integrityDoc(uid)).data.rebuildStatus != 'running';
+      let d = get(integrityDoc(uid));
+      return d == null || d.data.get('rebuildStatus', 'idle') != 'running';
     }
     function rebuildRunning(uid) {
-      return exists(integrityDoc(uid))
-          && get(integrityDoc(uid)).data.rebuildStatus == 'running';
+      let d = get(integrityDoc(uid));
+      return d != null && d.data.get('rebuildStatus', 'idle') == 'running';
     }
     function periodNotLocked(uid, pk) {
       return !exists(/databases/$(database)/documents/users/$(uid)/periodLocks/$(pk));
@@ -498,10 +529,17 @@ service cloud.firestore {
     // ══════════════════════════════════════════════════════════════════════
 
     function entryShapeOk(d) {
-      return d.keys().hasAll(['opId','kind','status','bookedAt','periodKey','lines',
+      return d.keys().hasAll(['opId','kind','status','bookedAt','bookedAtTs','periodKey','lines',
                               'accountIds','accountTypes','totalDebitMinor','totalCreditMinor',
                               'amountMinor','currency','ownerUid','schemaVersion',
                               'payloadHash','description','tags','refs'])
+        // ⚠ إصلاح ع-أمن-6: `bookedAtTs` **لم يكن** في قائمة `hasAll` لا في النواة 14.3 ولا
+        //   في النسخة الأولى من هذه الوثيقة، بينما قاعدة التحديث تفرض `unchanged('bookedAtTs')`
+        //   و`bookedWithin36h` تفرض وجوده. الأثر: قيد أُنشئ بلا `bookedAtTs` **لا يمكن عكسه
+        //   ولا استبداله أبداً** (التحديث يفشل بخطأ تقييم) ⇒ مسار النواة 8 (العكس/التعديل)
+        //   يتعطّل بلا رسالة مفهومة. الآن الحقل إلزامي وبنوعه.
+        && d.bookedAtTs is timestamp
+        && bookedAtTsSane(d)
         && d.currency == 'LYD'
         && d.schemaVersion is int && d.schemaVersion >= 1
         && d.status == 'posted'                                    // لا يُنشأ قيد بحالة أخرى
@@ -529,8 +567,12 @@ service cloud.firestore {
           && request.time.toMillis() - d.bookedAtTs.toMillis() < 129600000
           && d.bookedAtTs.toMillis() - request.time.toMillis() < 129600000;
     }
+    //    ⚠ `'isPriorPeriodCorrection' in d` **إلزامي قبل القراءة**: القيد العادي لا يحمل
+    //    الحقل، وقراءة مفتاح غائب خطأ تقييم. بلا هذا الشرط يصير رفض أي قيد في فترة مُقفلة
+    //    رفضاً بخطأ تقييم لا بشرط منطقي — فيُشخَّص خطأً عند التصحيح اللاحق للقواعد.
     function priorPeriodCorrectionOk(d) {
       return d.kind == 'reversal'
+          && 'isPriorPeriodCorrection' in d
           && d.isPriorPeriodCorrection == true
           && bookedWithin36h(d);
     }
@@ -549,18 +591,55 @@ service cloud.firestore {
       // ────────────────────────────────────────────────────────────────────
       //  5.1 — الإعدادات والملف الشخصي (قائمة مستندات مغلقة)
       // ────────────────────────────────────────────────────────────────────
+      // ⚠ إصلاح ع-أمن-10 (تدقيق معماري): القائمة المغلقة (ت-16) كانت تحجب أربعة مستندات
+      //   إعدادات مطلوبة فعلاً ⇒ permission-denied على إنشائها، وأربع شاشات ميتة:
+      //     'personal' و'worship'  ← 09-personal-worship.md §9
+      //     'recurrence'           ← 07-recurrence-notifications.md §16.1 (سقوف الاستدراك)
+      //   و'notifications' كانت موجودة أصلاً (07 §12.1 و§9.2 dismissedKeys).
+      //   وهذه الكتلة هي **الوحيدة** على المسار: كتلة 09 §11 أُلغيت هناك وشرطها مدموج أدناه،
+      //   لأنها كانت الأوسع فكانت تُسقط هذه التشديدات بتقييم OR.
       match /settings/{docId} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) && ownedNew(uid)
-          && docId in ['app','profile','notifications','dashboard','security']
+          && docId in ['app','profile','notifications','dashboard','security',
+                       'personal','worship','recurrence']
           && (!('currency' in request.resource.data)
-              || request.resource.data.currency == 'LYD');
+              || request.resource.data.currency == 'LYD')
+          // ← مدموج من 09 §9: بداية الأسبوع وإزاحة الهجري قيم مغلقة
+          && (docId != 'personal'
+              || (request.resource.data.weekStartsOn in [0, 1, 6]
+                  && request.resource.data.hijriOffsetDays in [-1, 0, 1]));
         allow update: if isOwner(uid) && ownerFrozen()
-          && docId in ['app','profile','notifications','dashboard','security']
+          && docId in ['app','profile','notifications','dashboard','security',
+                       'personal','worship','recurrence']
           && (!('currency' in request.resource.data)
               || request.resource.data.currency == 'LYD')
           && (!('displayDecimals' in request.resource.data)
-              || request.resource.data.displayDecimals in [0, 2, 3]);
+              || request.resource.data.displayDecimals in [0, 2, 3])
+          && (docId != 'personal'
+              || (request.resource.data.weekStartsOn in [0, 1, 6]
+                  && request.resource.data.hijriOffsetDays in [-1, 0, 1]));
+        allow delete: if false;
+      }
+
+      // ⚠ إصلاح ع-أمن-7: وثيقة نموذج البيانات (`03-data-model.md` §1.3 و§2.3 و§17 سؤال 4)
+      //   تضع الملف الشخصي في **مجموعة مستقلة** `profile/main` لا في `settings/profile`،
+      //   وتنصّ صراحةً على أنه «يحتاج `match /profile/{docId}`». النسخة الأولى من هذه
+      //   الوثيقة خالفت ذلك ⇒ شاشة الملف الشخصي **كانت ميتة** (`permission-denied`).
+      //   المعتمد: المساران مفتوحان، و`profile/main` هو المسار الرسمي؛ `settings/profile`
+      //   يبقى مقبولاً للتوافق ويُحسم أيّهما يُحذف في سؤال مفتوح رقم 9.
+      match /profile/{docId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && ownedNew(uid)
+          && docId == 'main'
+          && strBetween('displayName', 1, 160)
+          && (!('currency' in request.resource.data)
+              || request.resource.data.currency == 'LYD');
+        allow update: if isOwner(uid) && ownerFrozen()
+          && docId == 'main'
+          && strBetween('displayName', 1, 160)
+          && (!('currency' in request.resource.data)
+              || request.resource.data.currency == 'LYD');
         allow delete: if false;
       }
 
@@ -623,6 +702,111 @@ service cloud.firestore {
       }
 
       // ══════════════════════════════════════════════════════════════════
+      //  5.2ب — ⚠ إصلاح ع-أمن-15 (تدقيق معماري): ست مجموعات معرَّفة في المخطط
+      //         و**بلا قاعدة** ⇒ مرفوضة بالكامل ⇒ ميزاتها لا تعمل. القسم 4 كان يدّعي
+      //         «لا مجموعة مطلوبة بلا قاعدة»، والادعاء كان غير صحيح.
+      // ══════════════════════════════════════════════════════════════════
+
+      // قوالب سقوف الميزانية — 03-data-model §4.7. بلا قالب يُعاد إدخال كل السقوف كل شهر.
+      match /budgetTemplates/{templateId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && ownedNew(uid)
+          && strBetween('name', 1, 120)
+          && request.resource.data.caps is map;
+        allow update: if isOwner(uid) && ownerFrozen()
+          && strBetween('name', 1, 120)
+          && request.resource.data.caps is map;
+        allow delete: if isOwner(uid);        // قالب ليس سجلاً محاسبياً
+      }
+
+      // السيناريوهات المالية — 03-data-model §5.7. **الافتراضات فقط، بلا نتائج مخزَّنة**:
+      // أي حقل نتيجة هنا يصير «رقماً مالياً بلا قيد» ⇒ ممنوع بنيوياً.
+      match /scenarios/{scenarioId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && ownedNew(uid)
+          && strBetween('name', 1, 120)
+          && request.resource.data.assumptions is map
+          && !('resultMinor'  in request.resource.data)
+          && !('computedAt'   in request.resource.data);
+        allow update: if isOwner(uid) && ownerFrozen()
+          && strBetween('name', 1, 120)
+          && request.resource.data.assumptions is map
+          && !('resultMinor'  in request.resource.data)
+          && !('computedAt'   in request.resource.data);
+        allow delete: if isOwner(uid);
+      }
+
+      // دفعات الاستيراد — العقد §7.4 و03-data-model §5.8. `aggregatesApplied` لا يرتدّ:
+      // ارتداده يعني إعادة تطبيق نفس المُجمَّعات ⇒ تضخيم أرصدة بلا قيد مقابل.
+      match /importBatches/{batchId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && ownedNew(uid)
+          && request.resource.data.status in ['staged','applied','rejected']
+          && request.resource.data.aggregatesApplied == false
+          && request.resource.data.rowCount is int
+          && request.resource.data.rowCount >= 0;
+        allow update: if isOwner(uid) && ownerFrozen()
+          && request.resource.data.status in ['staged','applied','rejected']
+          && request.resource.data.aggregatesApplied is bool
+          && (   resource.data.aggregatesApplied == false
+              || request.resource.data.aggregatesApplied == true );   // لا ارتداد
+        allow delete: if false;
+      }
+
+      // محجوزة — ADR-008: محور الشهر المالي غير مُفعَّل في الإصدار الأول.
+      // المنع **صريح** لا بالافتراضي: كتابة هنا تعني أن أحداً فعّل محوراً ثانياً للفترات
+      // بلا ADR ⇒ ملخّصان شهريان متنافسان. يُفتح بقرار مالك و ADR جديد.
+      match /fiscalPeriods/{fiscalKey} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      // مقترح المصروف المتكرر — 07 §16.2 (منقولة كما هي، فهي بلا تصادم مسار).
+      match /recurrenceProposals/{opId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && ownedNew(uid)
+          && request.resource.data.id == opId
+          && request.resource.data.opId == opId
+          && request.resource.data.recurrenceKind == 'expense'
+          && request.resource.data.status == 'awaitingConfirmation'
+          && isPosMoney(request.resource.data.amountMinor)
+          && request.resource.data.occurrenceKey is string
+          && request.resource.data.occurrenceKey.size() == 10
+          && request.resource.data.entryId == null
+          && rebuildNotRunning(uid);
+        allow update: if isOwner(uid)
+          && touchedOnly(['status','entryId','decidedAt','skipReason','updatedAt'])
+          && request.resource.data.status in ['confirmed','skipped','expired']
+          && resource.data.status == 'awaitingConfirmation'       // لا رجوع عن قرار
+          && (   request.resource.data.status != 'confirmed'
+              || request.resource.data.entryId == opId );
+        allow delete: if false;
+      }
+
+      // التكرار غير المالي — 07 §16.2 (منقولة كما هي). لا تلمس مالاً ⇒ الحذف حق للمستخدم.
+      match /personalRecurrences/{id} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && ownedNew(uid)
+          && request.resource.data.kind in ['task','reminder','dhikr','prayer','quranWird']
+          && request.resource.data.frequency in
+               ['daily','weekly','biweekly','monthly','quarterly','yearly']
+          && request.resource.data.interval is int
+          && request.resource.data.interval >= 1
+          && request.resource.data.interval <= 99
+          && request.resource.data.dayOfMonthPolicy in ['clampToEndOfMonth','exact']
+          && dateKeyOk('startDate')
+          && request.resource.data.status in ['active','paused','ended']
+          && (!('maxOccurrences' in request.resource.data)
+              || (   request.resource.data.maxOccurrences is int
+                  && request.resource.data.maxOccurrences >= 1
+                  && request.resource.data.maxOccurrences <= 1000 ));
+        allow update: if isOwner(uid) && ownerFrozen()
+          && unchanged('kind')
+          && request.resource.data.status in ['active','paused','ended'];
+        allow delete: if isOwner(uid);
+      }
+
+      // ══════════════════════════════════════════════════════════════════
       //  5.3 — الدفتر: لا تعديل محاسبي، ولا حذف، أبداً
       // ══════════════════════════════════════════════════════════════════
       match /journalEntries/{entryId} {
@@ -657,6 +841,13 @@ service cloud.firestore {
           && unchanged('bookedAt') && unchanged('bookedAtTs') && unchanged('periodKey')
           && unchanged('refs') && unchanged('createdAt') && unchanged('createdBy')
           && request.resource.data.status in ['posted','reversed','replaced']
+          // ⚠ إصلاح ع-أمن-8: الانتقال **من** حالة نهائية ممنوع. النسخة الأولى فحصت
+          //   الحالة الجديدة فقط ⇒ كان يمكن إرجاع قيد `reversed` إلى `posted` **مع بقاء
+          //   قيد العكس موجوداً** ⇒ العملية تُحسب مرتين في كل تقرير يُرشِّح
+          //   `status == 'posted'`، ولا يكشفه ميزان المراجعة (I4) لأن الأرصدة لم تتغيّر.
+          //   المسموح: `posted → posted|reversed|replaced` فقط؛ والحالة النهائية تبقى.
+          && (   resource.data.status == 'posted'
+              || request.resource.data.status == resource.data.status )
           && resource.data.kind != 'reversal'          // قيد العكس غير قابل للتعديل
           && strBetween('description', 1, 500)
           && listMax('tags', 20);
@@ -667,11 +858,14 @@ service cloud.firestore {
       // postings: تُكتب مع القيد، ولا تُعدَّل ولا تُحذف أبداً
       match /postings/{postingId} {
         allow read: if isOwner(uid);
-        allow create: if isOwner(uid)
-          && request.resource.data.ownerUid == uid
+        allow create: if isOwner(uid) && ownedNew(uid)      // ← ع-أمن-9: المبدأ 5 يفرض
+                                                           //   ownerUid + schemaVersion +
+                                                           //   createdAt على **كل** إنشاء،
+                                                           //   وpostings كانت الاستثناء الوحيد
           && request.resource.data.entryId is string
           && request.resource.data.lineNo is int
           && request.resource.data.lineNo >= 1
+          && request.resource.data.lineNo <= 50
           && postingId == request.resource.data.entryId + '__'
                         + string(request.resource.data.lineNo)
           && isPosInt(request.resource.data.amountMinor)
@@ -683,7 +877,22 @@ service cloud.firestore {
           && request.resource.data.side in ['debit','credit']
           && request.resource.data.accountType in
                ['asset','liability','income','expense','equity']
+          && dateKeyOk('bookedAt')                               // ← قبل التقطيع [0:7]
+          && periodKeyFieldOk('periodKey')
           && request.resource.data.periodKey == request.resource.data.bookedAt[0:7]
+
+          // ⚠ إصلاح ع-أمن-10 (أهم تشديد في هذه المراجعة): **ربط الـ posting بقيده مفروضاً
+          //   من الخادم** بـ `getAfter()` — وهي الحالة **بعد** تنفيذ المعاملة، فتعمل مع
+          //   القيد المكتوب في **نفس** `runTransaction`.
+          //   بلا هذا الشرط يستطيع أي عميل كتابة postings **بلا قيد أصلاً** أو بمبلغ لا
+          //   علاقة له بقيده. وهذا ليس تفصيلاً: القسم 8.2 بند 3 يبني قبول «العميل الموثوق»
+          //   على أن `postings` **مصدر مستقل** عن `accounts` فيكشف I11 انحراف المقدار —
+          //   وهو استدلال يسقط إن كان العميل نفسه يكتب الطرفين بحرية. الآن `postings`
+          //   مشتقّ **مفروض** من الدفتر، فاستقلاله حقيقي لا مفترض.
+          //   التكلفة: **استدعاء وصول واحد** لكل posting (ربط `let` واحد داخل الدالة، لا
+          //   ثلاثة استدعاءات) ⇒ يُدخَل في قياس ح-123/ح-124.
+          && postingBoundToEntry(uid, request.resource.data)
+
           && rebuildNotRunning(uid);
         allow update, delete: if false;
       }
@@ -1033,14 +1242,22 @@ service cloud.firestore {
       }
 
       // بوابة إعادة البناء وحارس النسخة. التحويل إلى running عملية مدمِّرة.
+      // ⚠ إصلاح ع-أمن-11 (تدقيق معماري): القائمة المغلقة (ت-15) كانت `['integrity','schema']`
+      //   فقط، فتحجب ثلاثة مستندات meta مطلوبة نصّاً:
+      //     'quran'     ← 03-data-model.md §1.3 و§5.10 (موضع القراءة وعدّاد الختمات)
+      //     'backup'    ← 03-data-model.md §1.3 و§5.10 (مؤشّرات التصدير — وهي النسخة الوحيدة، ق-1)
+      //     'scheduler' ← 07-recurrence-notifications.md §2.5 و§16.1
+      //   والأخطر: بغياب 'scheduler' يسقط استقصاء ساعة الخادم ⇒ «اليوم» يُحسب من ساعة الجهاز
+      //   ⇒ مفاتيح الدورات الحتمية تُكتب بتاريخ خاطئ في دفتر لا يُحذف منه شيء (07 §2.5).
+      //   ويبقى قصد ت-15 قائماً: القائمة مغلقة، لكنها كاملة.
       match /meta/{docId} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) && ownedNew(uid)
-          && docId in ['integrity','schema']
+          && docId in ['integrity','schema','scheduler','quran','backup']
           && (   docId != 'integrity'
               || request.resource.data.rebuildStatus == 'idle' );
         allow update: if isOwner(uid) && ownerFrozen()
-          && docId in ['integrity','schema']
+          && docId in ['integrity','schema','scheduler','quran','backup']
           && (
                docId != 'integrity'
                || (
@@ -1108,21 +1325,45 @@ service cloud.firestore {
         allow delete: if isOwner(uid);
       }
 
+      // ⚠ إصلاح ع-أمن-12 (تدقيق معماري): الحقل `bodyHtml` **لا وجود له** في التصميم المعتمد.
+      //   `09-personal-worship.md` §3.1 و§3.4: الملاحظة **مستندان** — رأس خفيف هنا، والجسد في
+      //   المجموعة الفرعية `notes/{id}/content/body` بصيغة **ProseMirror JSON** لا HTML،
+      //   و«صفر innerHTML» قرار معلن (ADR-PW-03). فاشتراط `strMax('bodyHtml', …)` — وهي
+      //   تفشل عند غياب الحقل — كان يرفض **كل** إنشاء ملاحظة.
+      //   والأخطر: **لا قاعدة على `notes/{id}/content/{docId}` إطلاقاً** ⇒ وقواعد Firestore
+      //   لا ترث: `match /users/{uid}` لا يشمل المجموعات الفرعية غير المصرَّح بها ⇒
+      //   `/{document=**}` يرفضها ⇒ **محرّر الملاحظات ميت بالكامل**.
+      //   المعتمد: مخطط 09 §11 هو المرجع؛ وما هنا يُطابقه.
       match /notes/{id} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) && ownedNew(uid)
           && strMax('title', 200)
-          && strMax('bodyHtml', 100000)         // سقف حجم يمنع تفخيم المستند
           && request.resource.data.pinned is bool
-          && request.resource.data.archived is bool
-          && listMax('tags', 20);
+          && request.resource.data.trashed is bool
+          && request.resource.data.contentVersion is int
+          && request.resource.data.contentVersion >= 1
+          && listMax('tags', 20)
+          && listMax('searchTokens', 150);          // P7
         allow update: if isOwner(uid) && ownerFrozen()
           && strMax('title', 200)
-          && strMax('bodyHtml', 100000)
           && request.resource.data.pinned is bool
-          && request.resource.data.archived is bool
-          && listMax('tags', 20);
-        allow delete: if isOwner(uid);
+          && request.resource.data.trashed is bool
+          && request.resource.data.contentVersion is int
+          && request.resource.data.contentVersion >= resource.data.contentVersion  // P6: لا ارتداد
+          && listMax('tags', 20)
+          && listMax('searchTokens', 150);
+        allow delete: if isOwner(uid) && resource.data.trashed == true;   // من السلة فقط
+      }
+
+      // جسد الملاحظة — المجموعة الفرعية التي كانت غائبة (ع-أمن-12)
+      match /notes/{noteId}/content/{docId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && docId == 'body'
+          && request.resource.data.ownerUid == uid
+          && request.resource.data.contentVersion is int
+          && request.resource.data.contentVersion >= 1;
+        allow delete: if isOwner(uid);        // مع الحذف النهائي للملاحظة
       }
 
       match /taskLists/{id} {
@@ -1132,13 +1373,20 @@ service cloud.firestore {
         allow delete: if isOwner(uid);
       }
 
+      // ⚠ إصلاح ع-أمن-13 (تدقيق معماري): اتحاد الحالات كان `['todo','doing','done','cancelled']`
+      //   وهو **لا يحتوي `'open'`**. و`07-recurrence-notifications.md` §1.2 (المُشغِّل يكتب
+      //   `'open'` ومحدِّداته تستعلم `status == 'open'`) و`09-personal-worship.md` §17.1
+      //   (رجعت عن `todo|inProgress` صراحةً) اتفقتا على **`'open' | 'done' | 'cancelled'`**.
+      //   الأثر لو بقي: **كل مهمة مُولَّدة أو يدوية تُرفَض** ⇒ وحدة المهام لا تعمل أصلاً.
+      //   وهذه الكتلة هي **الوحيدة** على المسار (كتلة 07 §16.2 أُلغيت، وشرطاها مدموجان أدناه،
+      //   وكتلة 09 §11 تُدمَج فيها عند النشر).
       match /tasks/{id} {
         allow read: if isOwner(uid);
         // «لا تُعرض مهمة كمكتملة دون إجراء إكمال صريح» (المتطلبات، القسم 14)
-        // ⇒ done يستلزم completedAt غير فارغ، مفروضاً من الخادم.
+        // ⇒ done يستلزم completedAt غير فارغ، مفروضاً من الخادم (P4).
         allow create: if isOwner(uid) && ownedNew(uid)
           && strBetween('title', 1, 300)
-          && request.resource.data.status in ['todo','doing','done','cancelled']
+          && request.resource.data.status in ['open','done','cancelled']
           && request.resource.data.priority in [1, 2, 3]
           && (!('dueDate' in request.resource.data)
               || request.resource.data.dueDate == null
@@ -1148,56 +1396,98 @@ service cloud.firestore {
                   && request.resource.data.completedAt != null ) );
         allow update: if isOwner(uid) && ownerFrozen()
           && strBetween('title', 1, 300)
-          && request.resource.data.status in ['todo','doing','done','cancelled']
+          && request.resource.data.status in ['open','done','cancelled']
           && request.resource.data.priority in [1, 2, 3]
           && (   request.resource.data.status != 'done'
               || (   'completedAt' in request.resource.data
-                  && request.resource.data.completedAt != null ) );
+                  && request.resource.data.completedAt != null ) )
+          // ← مدموج من 07 §16.2: نسب المهمة إلى قاعدتها ودورتها غير قابل للتغيير
+          && request.resource.data.recurrenceId  == resource.data.recurrenceId
+          && request.resource.data.occurrenceKey == resource.data.occurrenceKey;
         allow delete: if isOwner(uid);
       }
 
       // ══════════════════════════════════════════════════════════════════
       //  5.12 — العبادات: سجلات شخصية بمعرّف = يوم تقويمي
       //         لا حذف (السجل التاريخي الشخصي يُحترم كالدفتر)
+      //
+      //  ⚠ إصلاح ع-أمن-14 (تدقيق معماري) — تعارض أسماء ثلاثي الأطراف:
+      //    | المجموعة | هذه الوثيقة (سابقاً) | 03-data-model §7 | 09-personal-worship (المعتمد) |
+      //    | الصلاة/الصيام/الأذكار | worshipRecords/{YYYY-MM-DD} | worshipRecords/{YYYY-MM} شهري | worshipDays/{YYYY-MM-DD} — ADR-PW-15 |
+      //    | الورد | quranProgress/{YYYY-MM-DD} | quranProgress/{YYYY-MM} شهري | quranSessions/{sessionId} — ADR-PW-18 |
+      //    و09 §5.2 يرفض «مستند للشهر» بالأرقام (مستند ساخن + دمج حقول يطمس كتابات جهاز آخر
+      //    + مسارات حقول مثل days.17.fajr.state تجعل التحقق من الشكل مستحيلاً في القواعد).
+      //    و09 §6.2 يرفض العدّاد التراكمي `pagesRead` لأنه **لا يُصحَّح ولا يُدقَّق**.
+      //    ⇒ المعتمد أسماء 09، والمخططان أدناه أُعيد بناؤهما عليها.
+      //    وأُضيفت `habits` التي لم تكن لها قاعدة إطلاقاً (09 §7.1).
       // ══════════════════════════════════════════════════════════════════
-      match /worshipRecords/{dateKey} {
+      match /worshipDays/{dateKey} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) && ownedNew(uid)
           && dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-          && request.resource.data.dateKey == dateKey
+          && request.resource.data.dateKey == dateKey                 // P1
+          && request.resource.data.periodKey == dateKey[0:7]           // P1
           && request.resource.data.prayers is map
           && request.resource.data.prayers.keys().hasOnly(
                ['fajr','dhuhr','asr','maghrib','isha'])
-          && (!('fastingVoluntary' in request.resource.data)
-              || request.resource.data.fastingVoluntary is bool)
-          && (!('notes' in request.resource.data) || strMax('notes', 1000));
+          && request.resource.data.prayers.keys().hasAll(
+               ['fajr','dhuhr','asr','maghrib','isha'])                // P2: الخمسة بالضبط
+          && (!('fasting' in request.resource.data)
+              || request.resource.data.fasting.state in ['unset','fasted','notFasted'])
+          && (!('note' in request.resource.data) || strMax('note', 500));
+        // ⚠ ملاحظة تقنية: الكتابة هنا `setDoc(..., { merge: true })` لتعمل دون اتصال
+        //   (09 §5.3) ⇒ **لا `createdAt`** على هذا المستند، ولذلك `ownedNew`/`ownerFrozen`
+        //   لا تفحصانه. وهو انحراف مقصود وموثَّق عن `OwnedDoc` (09 §5.1).
         allow update: if isOwner(uid) && ownerFrozen()
-          && unchanged('dateKey')
+          && unchanged('dateKey') && unchanged('periodKey')
           && request.resource.data.prayers is map
           && request.resource.data.prayers.keys().hasOnly(
                ['fajr','dhuhr','asr','maghrib','isha'])
-          && (!('notes' in request.resource.data) || strMax('notes', 1000));
-        allow delete: if false;
+          && (!('note' in request.resource.data) || strMax('note', 500));
+        allow delete: if false;        // التفريغ بإعادة الحالة إلى 'unset'، لا بالحذف
       }
 
-      match /quranProgress/{dateKey} {
+      // العادات والأذكار — تعريف قابل للتخصيص (09 §7.1). كانت بلا قاعدة.
+      match /habits/{id} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) && ownedNew(uid)
-          && dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-          && request.resource.data.dateKey == dateKey
-          && request.resource.data.pagesRead is int
-          && request.resource.data.pagesRead >= 0
-          && request.resource.data.pagesRead <= 604      // سقف مصحف المدينة
-          && (!('dailyTargetPages' in request.resource.data)
-              || (   request.resource.data.dailyTargetPages is int
-                  && request.resource.data.dailyTargetPages >= 0
-                  && request.resource.data.dailyTargetPages <= 604 ));
+          && strBetween('name', 1, 120)
+          && request.resource.data.type in ['counter','boolean','quantity']
+          && request.resource.data.archived is bool;
         allow update: if isOwner(uid) && ownerFrozen()
-          && unchanged('dateKey')
-          && request.resource.data.pagesRead is int
-          && request.resource.data.pagesRead >= 0
-          && request.resource.data.pagesRead <= 604;
-        allow delete: if false;
+          && strBetween('name', 1, 120)
+          && request.resource.data.type in ['counter','boolean','quantity']
+          && request.resource.data.archived is bool;
+        allow delete: if isOwner(uid);
+      }
+
+      // الورد: **جلسات** لا عدّاد (09 §6.2 — ADR-PW-18). التقدّم مشتقّ بالاستعلام.
+      match /quranSessions/{id} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && ownedNew(uid)
+          && dateKeyOk('dateKey')
+          && request.resource.data.periodKey == request.resource.data.dateKey[0:7]
+          && request.resource.data.mode in ['reading','memorizing','reviewing','listening']
+          && request.resource.data.from.surah is int
+          && request.resource.data.from.surah >= 1 && request.resource.data.from.surah <= 114
+          && request.resource.data.to.surah   is int
+          && request.resource.data.to.surah   >= 1 && request.resource.data.to.surah   <= 114
+          && request.resource.data.from.page is int
+          && request.resource.data.from.page >= 1 && request.resource.data.from.page <= 604
+          && request.resource.data.to.page   is int
+          && request.resource.data.to.page   >= 1 && request.resource.data.to.page   <= 604
+          && request.resource.data.ayahCount is int
+          && request.resource.data.ayahCount >= 1
+          && request.resource.data.ayahCount <= 6236           // P9 + P10
+          && request.resource.data.pagesTouched is int
+          && request.resource.data.pagesTouched >= 1
+          && request.resource.data.pagesTouched <= 604
+          && (!('note' in request.resource.data) || strMax('note', 300));
+        allow update: if isOwner(uid) && ownerFrozen()
+          && unchanged('dateKey') && unchanged('periodKey')
+          && request.resource.data.ayahCount is int
+          && request.resource.data.ayahCount >= 1;
+        allow delete: if isOwner(uid);     // جلسة خاطئة تُحذف — ليست سجلاً محاسبياً (09 §6.2)
       }
 
       // ══════════════════════════════════════════════════════════════════

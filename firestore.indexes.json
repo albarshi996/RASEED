@@ -1,7 +1,57 @@
 {
   "indexes": [
     {
-      "collectionGroup": "postings",
+      "collectionGroup": "accounts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "sortOrder",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "accounts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "sortOrder",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "accounts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isCashLike",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "sortOrder",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "accountPeriods",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -9,61 +59,55 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "reversed",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "bookedAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "postings",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "accountId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "reversed",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "side",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "amountMinor",
+          "fieldPath": "periodKey",
           "order": "ASCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "postings",
+      "collectionGroup": "accountPeriods",
       "queryScope": "COLLECTION",
       "fields": [
         {
           "fieldPath": "periodKey",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "reversed",
           "order": "ASCENDING"
         },
         {
           "fieldPath": "accountId",
           "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journalEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accountIds",
+          "arrayConfig": "CONTAINS"
         },
         {
-          "fieldPath": "side",
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journalEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accountIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "bookedAt",
           "order": "ASCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "postings",
+      "collectionGroup": "journalEntries",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -71,43 +115,81 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "categoryId",
-          "order": "ASCENDING"
+          "fieldPath": "accountIds",
+          "arrayConfig": "CONTAINS"
         },
         {
-          "fieldPath": "reversed",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "bookedAt",
+          "fieldPath": "bookedAtTs",
           "order": "DESCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "postings",
+      "collectionGroup": "journalEntries",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "scope",
+          "fieldPath": "status",
           "order": "ASCENDING"
         },
+        {
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journalEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journalEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
         {
           "fieldPath": "periodKey",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "reversed",
+          "fieldPath": "bookedAtTs",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journalEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "periodKey",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "bookedAt",
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
           "order": "DESCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "postings",
+      "collectionGroup": "journalEntries",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -115,35 +197,13 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "reversed",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "bookedAt",
+          "fieldPath": "bookedAtTs",
           "order": "DESCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "postings",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "refs.obligationId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "reversed",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "settlementDeltaMinor",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "postings",
+      "collectionGroup": "journalEntries",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -151,61 +211,7 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "reversed",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "settlementDeltaMinor",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "postings",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "reversed",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "side",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "amountMinor",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "postings",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "entryId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "lineIndex",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "journalEntries",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "periodKey",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "reversed",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "bookedAt",
+          "fieldPath": "bookedAtTs",
           "order": "DESCENDING"
         }
       ]
@@ -215,15 +221,67 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "kind",
+          "fieldPath": "refs.goalId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "reversed",
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journalEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "refs.zakatRecordId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "bookedAt",
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journalEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "refs.incomeScheduleId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journalEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "correctionGroupId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journalEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "tags",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "bookedAtTs",
           "order": "DESCENDING"
         }
       ]
@@ -243,7 +301,25 @@
       ]
     },
     {
-      "collectionGroup": "accountPeriods",
+      "collectionGroup": "journalEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "tags",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journalEntries",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -251,13 +327,297 @@
           "order": "ASCENDING"
         },
         {
+          "fieldPath": "accountTypes",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "accountId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAt",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
           "order": "ASCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "accountPeriods",
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accountId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "accountType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accountType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAt",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "categoryId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "categoryId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAt",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "accountType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tags",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "obligationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "debtId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "goalId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "contactId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAt",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accountType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "amountMinor",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "entryKind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAtTs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accountId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "accountType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "tags",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "accountType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAt",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "accountId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -266,6 +626,200 @@
         },
         {
           "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "accountType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "accountType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tags",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isCashLike",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "categoryId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "contactId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "goalId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isCashLike",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bookedAt",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "signedAmountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "periodKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "side",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "amountMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "obligationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "settlementDeltaMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "postings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "debtId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "settlementDeltaMinor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "obligations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isOpen",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueDate",
           "order": "ASCENDING"
         }
       ]
@@ -289,11 +843,89 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "isOpen",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "nature",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "status",
+          "fieldPath": "dueDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "obligations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "categoryId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isOpen",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "obligations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "payeeContactId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "obligations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "recurrenceId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "occurrenceKey",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "obligations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "remainingMinor",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "dueDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "obligations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isOpen",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "priority",
           "order": "ASCENDING"
         },
         {
@@ -311,6 +943,180 @@
           "order": "ASCENDING"
         },
         {
+          "fieldPath": "isOpen",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "expectedSettleAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "debts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "direction",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "expectedSettleAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "debts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "counterpartyContactId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "direction",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "originatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "debts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isOpen",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextFollowUpDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "debts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "direction",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isOpen",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "remainingMinor",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "financialGoals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "targetDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "financialGoals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "priority",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "recurrences",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "incomeSchedules",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextExpectedDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "contacts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nameLower",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "contacts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nameLower",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "status",
           "order": "ASCENDING"
         },
@@ -321,15 +1127,363 @@
       ]
     },
     {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueDate",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "priority",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "listId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "sortOrder",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "completedOn",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "priority",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tags",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "dueDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "recurrenceId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "occurrenceKey",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "pinned",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "notebookId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tags",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "searchTokens",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "reminders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextFireAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "reminders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "target.kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextFireAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "read",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "severity",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "read",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "zakatRecords",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "hawlEndDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "auditLogs",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "targetEntryId",
+          "fieldPath": "targetId",
           "order": "ASCENDING"
         },
         {
           "fieldPath": "at",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "auditLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "action",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "at",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "auditLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "targetCollection",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "at",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "auditLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "opId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "at",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "operations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "operations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
           "order": "DESCENDING"
         }
       ]
@@ -343,8 +1497,50 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "createdAt",
+          "fieldPath": "createdAtClient",
           "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "importBatches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "attachments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "linkedTo.docId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "scenarios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
         }
       ]
     }
@@ -362,27 +1558,117 @@
     },
     {
       "collectionGroup": "journalEntries",
+      "fieldPath": "attachmentIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "journalEntries",
       "fieldPath": "payloadHash",
       "indexes": []
     },
     {
       "collectionGroup": "journalEntries",
-      "fieldPath": "tags",
+      "fieldPath": "clientCreatedAt",
       "indexes": []
     },
     {
       "collectionGroup": "journalEntries",
-      "fieldPath": "accountIds",
-      "indexes": [
-        {
-          "queryScope": "COLLECTION",
-          "arrayConfig": "CONTAINS"
-        }
-      ]
+      "fieldPath": "correctionReason",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "postings",
+      "fieldPath": "accountCode",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "postings",
+      "fieldPath": "lineNo",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "accounts",
+      "fieldPath": "ancestorIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "accounts",
+      "fieldPath": "nameLower",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "accounts",
+      "fieldPath": "notes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "accounts",
+      "fieldPath": "openingBalanceMinor",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "accounts",
+      "fieldPath": "debitTotalMinor",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "accounts",
+      "fieldPath": "creditTotalMinor",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "accounts",
+      "fieldPath": "earmarkedMinor",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "accounts",
+      "fieldPath": "lastVerifiedBalanceMinor",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "periods",
+      "fieldPath": "expenseByCategory",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "periods",
+      "fieldPath": "incomeBySource",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "budgetPeriods",
+      "fieldPath": "categories",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "budgetTemplates",
+      "fieldPath": "categories",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "obligations",
+      "fieldPath": "installments",
+      "indexes": []
     },
     {
       "collectionGroup": "obligations",
       "fieldPath": "notes",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "obligations",
+      "fieldPath": "attachmentIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "obligations",
+      "fieldPath": "extraChargesReason",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "debts",
+      "fieldPath": "installments",
       "indexes": []
     },
     {
@@ -391,8 +1677,148 @@
       "indexes": []
     },
     {
+      "collectionGroup": "debts",
+      "fieldPath": "attachmentIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "debts",
+      "fieldPath": "counterpartyName",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "recurrences",
+      "fieldPath": "template",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "incomeSchedules",
+      "fieldPath": "occurrences",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "pendingCommands",
+      "fieldPath": "payload",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "pendingCommands",
+      "fieldPath": "rejectionMessageAr",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "notes",
+      "fieldPath": "content",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "notifications",
+      "fieldPath": "link",
+      "indexes": []
+    },
+    {
       "collectionGroup": "auditLogs",
-      "fieldPath": "beforeAfter",
+      "fieldPath": "before",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "auditLogs",
+      "fieldPath": "after",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "importBatches",
+      "fieldPath": "errors",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "worshipRecords",
+      "fieldPath": "days",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "worshipRecords",
+      "fieldPath": "summary",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "quranProgress",
+      "fieldPath": "days",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "quranProgress",
+      "fieldPath": "summary",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "operations",
+      "fieldPath": "entryIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "operations",
+      "fieldPath": "touchedDocIds",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "operations",
+      "fieldPath": "resultSummary",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "settings",
+      "fieldPath": "cards",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "settings",
+      "fieldPath": "display",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "settings",
+      "fieldPath": "notifications",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "settings",
+      "fieldPath": "worship",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "settings",
+      "fieldPath": "defaults",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "zakatRecords",
+      "fieldPath": "assets",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "zakatRecords",
+      "fieldPath": "deductions",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "zakatRecords",
+      "fieldPath": "assumptionsAr",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "zakatRecords",
+      "fieldPath": "sourcesAr",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "zakatRecords",
+      "fieldPath": "calculationMethodAr",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "scenarios",
+      "fieldPath": "categoryOverridesBps",
       "indexes": []
     }
   ]

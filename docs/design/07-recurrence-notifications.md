@@ -201,12 +201,29 @@ export function maxKey(a: DateKey, b: DateKey): DateKey;
 export function toLocalHm(epochMs: number): string;
 ```
 
-### 2.4 لا أسبوع يبدأ بالاثنين
+### 2.4 لا أسبوع يبدأ بالاثنين — ويبدأ بالسبت لا بالأحد
 
-**القرار:** الأسبوع يبدأ **بالأحد** (`weekStartsOn = 0`) في كل عرض وفي كل تقرير أسبوعي وفي
-`weekly`/`biweekly`. السبب: عرف العمل في ليبيا، ويوافق افتراض `ar-LY`. ثابت واحد
-`WEEK_STARTS_ON = 0` في `domain/time/tz.ts`، ولا مفتاح تبديل في الإصدار الأول (نفس منطق ق-3:
-تقليل سطح الاختبار).
+> **تصحيح اتساق (تدقيق معماري):** هذا القسم كان ينصّ على **الأحد** (`WEEK_STARTS_ON = 0`)
+> ويُبرِّره بأنه «يوافق افتراض `ar-LY`». **التبرير معاكس للواقع**، والقياس الفعلي
+> (Node v24.18 / ICU 78.3): `new Intl.Locale('ar-LY').weekInfo` ⇒ `{"firstDay":6,"weekend":[5,6]}`
+> أي أن CLDR يضع **السبت** أول الأسبوع لليبيا ونهاية الأسبوع الجمعة والسبت.
+> وتقول `05-design-system.md` §8.6 بالسبت، و`09-personal-worship.md` §9 بالافتراضي 6 (السبت).
+> **الأثر لو بقي الأحد:** العرض الأسبوعي يبدأ بالسبت والمحرّك يحسب دورة `weekly`/`biweekly`
+> من الأحد ⇒ **الدورة تنزلق يوماً واحداً عن الشبكة التي وُلِّدت منها**، وهو انحراف لا يكشفه
+> أي ثابت لأن كلا الطرفين «صحيح داخلياً».
+
+**القرار المعتمد:** الأسبوع يبدأ **بالسبت** (`WEEK_STARTS_ON = 6`) في كل عرض وفي كل تقرير
+أسبوعي وفي `weekly`/`biweekly`، ونهاية الأسبوع `WEEKEND = [5, 6]` (الجمعة والسبت).
+السبب: عرف العمل في ليبيا، **وهو ما يعطيه `ar-LY` في CLDR فعلاً**.
+ثابت واحد `WEEK_STARTS_ON = 6` في `domain/time/tz.ts`، **ولا تُقرأ القيمة من `weekInfo`
+في وقت التشغيل** (غير مدعومة في كل المتصفحات ⇒ تقرير أسبوعي يختلف بين الأجهزة).
+
+**ولا مفتاح تبديل في الإصدار الأول** (نفس منطق ق-3: تقليل سطح الاختبار).
+> **تعارض مفتوح:** `09-personal-worship.md` §9 يُعرِّف `settings/personal.weekStartsOn: 0|1|6`
+> **كمفتاح**، وقاعدته الأمنية تفرض `weekStartsOn in [0,1,6]`. أي أن الوثيقتين تتفقان على
+> الافتراضي (6) وتختلفان على **وجود المفتاح**. حتى قرار المالك: **الثابت 6 هو المعتمد في
+> محرّك التكرار، والمفتاح لا يُقرأ منه** — فمحرّك الدورات لا يجوز أن يتبع إعداد عرض،
+> وإلا تغيّر معنى `occurrenceKey` لقاعدة قائمة بتغيير مفتاح في الإعدادات. → `openQuestions`
 
 ### 2.5 «اليوم» يُستنبط من وقت الخادم، لا من ساعة الجهاز
 
@@ -219,9 +236,12 @@ export function toLocalHm(epochMs: number): string;
 ```
 getServerClock(uid, deviceId):
   t0 = performance.now()
-  setDoc(users/{uid}/meta/scheduler, { probeAt: serverTimestamp(), lastRunDeviceId: deviceId },
-         { merge: true })
-  snap = await getDoc(users/{uid}/meta/scheduler, { source: 'server' })
+  await setDoc(users/{uid}/meta/scheduler, { probeAt: serverTimestamp(), lastRunDeviceId: deviceId },
+               { merge: true })
+  // ⚠ تصحيح اتساق (تدقيق معماري): الـ SDK المعياري (firebase 13) **لا يقبل** خيارات في getDoc.
+  //    `getDoc(ref, { source: 'server' })` من واجهة compat/الهاتف، وغير موجود هنا.
+  //    الدالة الصحيحة: getDocFromServer(ref)  ← انظر التنبيه تحت الجدول.
+  snap = await getDocFromServer(users/{uid}/meta/scheduler)
   t1 = performance.now()
   rtt = t1 - t0
   serverNowMs = snap.data().probeAt.toMillis() + rtt / 2        // تصحيح نصف الرحلة
@@ -247,6 +267,21 @@ now():  // تُستخدم في كل النظام بدلاً من Date.now()
 بعكس قيد.
 **بديل مرفوض ثانٍ:** جلب الوقت من خدمة HTTP خارجية. مرفوض: تبعية خارجية، CORS، وخصوصية، ولا لزوم
 لها ومعنا خادم Firestore أصلاً.
+
+> **تعارض مع ADR-025/B11 — يحتاج استثناءً صريحاً (تدقيق معماري):**
+> `02-architecture.md` §4.4 القاعدة **B11** تمنع `getDocFromCache`/`getDocsFromCache`/
+> **`getDocFromServer`**/`getDocsFromServer` **في كل المشروع** بـ `no-restricted-imports`
+> (السبب: «قراءة مفوترة تتخطى الكاش بلا داعٍ»). والاستقصاء أعلاه **لا يعمل بغيرها**: مع
+> `persistentLocalCache` المُفعَّل (ADR-030) يُعيد `getDoc` العادي القيمة من الكاش المحلي
+> فوراً — بما فيها قيمة `probeAt` المُقدَّرة محلياً قبل وصول الكتابة للخادم — ⇒ `skewMs ≈ 0`
+> دائماً و**الحارس يصير صورياً**، وهو أسوأ من غيابه لأنه يَعِد بما لا يفعل.
+>
+> **الحل المعتمد:** B11 تُقيَّد بمسار واحد مستثنى ومسمّى:
+> **`src/data/scheduler/clock.ts`** — وهو الموضع الوحيد في المشروع المسموح له باستيراد
+> `getDocFromServer`، بتعليق استثناء موسوم. وتكلفته **قراءة واحدة في الجلسة** (§17).
+> هذا الاستثناء **يجب أن يُكتب في `eslint.config.js` مع القاعدة نفسها**، وإلا فشل البناء
+> أول ما تُضاف B11. (B11 لم تُضَف بعد إلى `eslint.config.js` القائم ⇒ لا عطل اليوم،
+> والاستثناء يُضاف في نفس اللحظة.) → مُدرَج في الأسئلة المفتوحة §22.1
 
 ---
 
@@ -1896,7 +1931,9 @@ END:VCALENDAR
 
 **الأساس الذي يجعل هذا «تفعيل ميزة لا إعادة بناء»:** `planCatchUp` و`planNotifications`
 و`applyCapsAndGrouping` و`occurrenceAt` **دوال نقية بلا استيراد من `firebase` ولا من `data`**
-(مفروض بـ `eslint-plugin-boundaries`، النواة §21). فالدالة المجدولة تستوردها كما هي، ويبقى المسار
+(مفروض بقواعد ESLint الأصلية `no-restricted-imports` — **ADR-025**، لا بـ `eslint-plugin-boundaries`
+التي نصّت عليها النواة ADR-018 ثم **رُفضت** لثغرتين حرجتين في `handlebars` تجرّهما اعتمادياتها؛
+التفصيل في `02-architecture.md` §4.4 و§14.1 د-3). فالدالة المجدولة تستوردها كما هي، ويبقى المسار
 العميل عاملاً كما هو (مزدوج، وآمن لأن المفاتيح حتمية: توليد الخادم 06:00 وتوليد العميل عند الفتح
 **لا يتضاعفان**).
 
@@ -1951,16 +1988,49 @@ END:VCALENDAR
 |---|---|---|---|
 | `users/{uid}/recurrenceProposals/{opId}` | مقترحات المصروف المتكرر | **لا** | يُنتج قيداً عند التأكيد |
 | `users/{uid}/personalRecurrences/{id}` | تكرار غير مالي | **نعم** | لا |
-| `users/{uid}/worshipDays/{YYYY-MM-DD}` | قائمة اليوم الروحية | نعم | لا |
+| `users/{uid}/worshipDays/{YYYY-MM-DD}` | **تملكه `09-personal-worship.md` §5.1 و§11** — هذه الوثيقة تقرأ منه ولا تعرّف مخططه ولا قاعدته | **لا** (`allow delete: if false` في 09؛ التفريغ بـ `'unset'`) | لا |
 | `users/{uid}/meta/scheduler` | حالة المُشغِّل ومرجع ساعة الخادم | **لا** | لا |
 | `users/{uid}/settings/notifications` | إعدادات التنبيهات والكتم | لا (استبدال) | لا |
 | `users/{uid}/settings/recurrence` | سقوف الاستدراك | لا (استبدال) | لا |
+
+> **تنبيه (تدقيق معماري):** المسارات الأربعة الجديدة التي تملكها هذه الوثيقة —
+> `recurrenceProposals`, `personalRecurrences`, `meta/scheduler`, `settings/recurrence` —
+> **غائبة كلها عن `03-data-model.md` §1.3** (مخطط المسارات الكامل). ومخطط المسارات هو ما يمشي
+> عليه التصدير الكامل (`exportAllJson`، ق-1) حلقةً على قائمة مسارات معروفة ⇒ **لو لم تُضَف هناك،
+> لا تدخل النسخة الاحتياطية الوحيدة للنظام**. وبما أن `recurrenceProposals` غير قابل للحذف
+> ويُنتج قيداً عند التأكيد، فسقوطه من التصدير **فقدان بيانات**. → يُضاف في `03-data-model.md`.
 | `users/{uid}/notifications/{dedupeKey}` | **قائم في النواة** — هذه الوثيقة تحدد مخططه ومعرّفه | نعم | لا |
 | `users/{uid}/tasks/{taskId}` | **تملكه وثيقة التنظيم الشخصي** — هذه الوثيقة تفرض عقد §1.2 | نعم | لا |
 
 **و`recurrences` و`incomeSchedules` و`obligations` قائمة في النواة ولا تُعدَّل بحقل واحد.**
 
-### 16.2 قواعد الأمان — تُضاف إلى §14.3 بلا تعديل قاعدة قائمة
+### 16.2 قواعد الأمان — تُضاف إلى ملف `04-security.md` §6، لا إلى مسوّدة النواة §14.3
+
+> **تصحيح اتساق إلزامي (تدقيق معماري). اقرأه قبل نسخ أي كتلة أدناه:**
+>
+> 1. **الملف القابل للنشر هو `04-security.md` §6، لا النواة §14.3.** مسوّدة النواة §14.3 فيها
+>    ثلاثة عيوب مُشخَّصة (ع-أمن-1 القاتل، ع-أمن-2، ع-أمن-3) وهي **ما يحمله `firestore.rules`
+>    في جذر المستودع اليوم حرفياً**. فأي كتلة تُدرَج «بعد `match /recurrences/{id}`» في النواة
+>    §14.3 تُدرَج في ملف **لا يُنشر**. الكتل أدناه مكانها `04-security.md` §6.
+> 2. **لا تُكرَّر `match` على مسار موجود.** قواعد Firestore تُقيَّم بـ **OR** بين كل كتلة تطابق
+>    المسار ⇒ **الأوسع تفوز، لا الأضيق**. وثلاث من الكتل أدناه تصطدم بكتل قائمة:
+>
+>    | المسار | من يملكه الآن | الحكم |
+>    |---|---|---|
+>    | `/tasks/{taskId}` | `04-security.md` §6 (بـ ت-17: `done ⇒ completedAt`) و`09-personal-worship.md` §11 (بـ `taskShapeOk` الكامل) | **تُحذف كتلة هذه الوثيقة.** ما تُضيفه فعلاً — تجميد `recurrenceId` و`occurrenceKey` — **يُدمَج شرطاً** داخل كتلة 09، فهي الأضيق |
+>    | `/worshipDays/{dateKey}` | `09-personal-worship.md` §11 (بـ `dayShapeOk` و`prayerOk` والمفاتيح الخمسة) | **تُحذف كتلة هذه الوثيقة.** كتلتها هنا `allow create, update` مدموجة بثلاثة شروط فقط ⇒ لو بقيت لأسقطت كل ما تفرضه 09 (الثابتان P1 و P2) |
+>    | `/notifications/{id}` | `04-security.md` §6 | **لا تُضاف كتلة ثانية.** التحصين المقترح أدناه (`id == dedupeKey`, `read == false`) **يُدمَج في كتلة 04-security** |
+>
+>    ويبقى من هذه الوثيقة كتلتان جديدتان لا تصطدمان بشيء: **`recurrenceProposals`** و
+>    **`personalRecurrences`**. وهما وحدهما ما يُنسخ كما هو.
+> 3. **`meta/scheduler` محجوب اليوم:** قاعدة `meta` في `04-security.md` §6 تفرض
+>    `docId in ['integrity','schema']` (التشديد ت-15) ⇒ إنشاء `meta/scheduler` **يُرفَض**،
+>    ومعه يسقط استقصاء ساعة الخادم (§2.5) وكل المُشغِّل. القائمة وُسِّعت هناك إلى
+>    `['integrity','schema','scheduler','quran','backup']`.
+> 4. **`settings/recurrence` محجوب اليوم** بنفس السبب: قائمة `settings` المغلقة (ت-16)
+>    لم تكن تشمله. وُسِّعت هناك.
+
+**الكتلتان المعتمدتان من هذه الوثيقة** (تُدرَجان في `04-security.md` §6 بعد `match /recurrences/{id}`):
 
 ```javascript
       // ══════════════════════════════════════════════════════════
@@ -2014,37 +2084,48 @@ END:VCALENDAR
         allow delete: if isOwner(uid);
       }
 
-      // المهام: مُولَّدة أو يدوية. occurrenceKey و recurrenceId **غير قابلين للتغيير** (عقد §1.2).
-      match /tasks/{taskId} {
-        allow read: if isOwner(uid);
-        allow create: if isOwner(uid)
-          && request.resource.data.ownerUid == uid
-          && request.resource.data.status in ['open','done','cancelled']
-          && request.resource.data.dueDate is string;
-        allow update: if isOwner(uid)
-          && request.resource.data.ownerUid == uid
-          && request.resource.data.status in ['open','done','cancelled']
-          && request.resource.data.recurrenceId   == resource.data.recurrenceId
-          && request.resource.data.occurrenceKey  == resource.data.occurrenceKey;
-        allow delete: if isOwner(uid);
-      }
-
-      // قائمة اليوم الروحية: مستند واحد لليوم، ومعرّفه هو اليوم.
-      match /worshipDays/{dateKey} {
-        allow read: if isOwner(uid);
-        allow create, update: if isOwner(uid)
-          && request.resource.data.ownerUid == uid
-          && request.resource.data.dateKey == dateKey
-          && dateKey.size() == 10;
-        allow delete: if isOwner(uid);
-      }
+      // ⛔ لا تُنسخ الكتلتان التاليتان: مساراهما مملوكان لـ 09 §11، والتكرار يُقيَّم بـ OR
+      //    فيُسقط الشروط الأضيق. محفوظتان للأثر التاريخي فقط، وما يبقى منهما هو السطران
+      //    الموسومان «يُدمَج» أدناه.
+      //
+      // ── [ملغاة] المهام — المسار مملوك لـ 09 §11 (taskShapeOk) و 04-security §6 (ت-17)
+      // match /tasks/{taskId} {
+      //   allow read: if isOwner(uid);
+      //   allow create: if isOwner(uid)
+      //     && request.resource.data.ownerUid == uid
+      //     && request.resource.data.status in ['open','done','cancelled']
+      //     && request.resource.data.dueDate is string;
+      //   allow update: if isOwner(uid)
+      //     && request.resource.data.ownerUid == uid
+      //     && request.resource.data.status in ['open','done','cancelled']
+      //     && request.resource.data.recurrenceId   == resource.data.recurrenceId   // ← يُدمَج في 09
+      //     && request.resource.data.occurrenceKey  == resource.data.occurrenceKey; // ← يُدمَج في 09
+      //   allow delete: if isOwner(uid);
+      // }
+      //
+      // ── [ملغاة] قائمة اليوم الروحية — المسار مملوك لـ 09 §11 (dayShapeOk + prayerOk)
+      //    هذه الكتلة `create, update` مدموجة بثلاثة شروط فقط ⇒ لو بقيت أسقطت P1 و P2.
+      // match /worshipDays/{dateKey} {
+      //   allow read: if isOwner(uid);
+      //   allow create, update: if isOwner(uid)
+      //     && request.resource.data.ownerUid == uid
+      //     && request.resource.data.dateKey == dateKey   // ← مفروض أصلاً في 09 (P1)
+      //     && dateKey.size() == 10;
+      //   allow delete: if isOwner(uid);
+      // }
 ```
 
 **تحصين إضافي مقترح على قاعدة `notifications` القائمة** — يمنع إنشاء تنبيه بمعرّف لا يطابق
 مفتاحه، وهو ما يحمي خصيصة منع التكرار من مسار كتابة ملتوٍ (القسم 22 سؤال 6):
 
+> ⚠ **هذه ليست كتلة تُضاف، بل ثلاثة شروط تُدمَج** في `match /notifications/{id}` القائمة في
+> `04-security.md` §6. كتلة ثانية على نفس المسار تُقيَّم بـ OR فتُسقط `strBetween('titleAr',1,200)`
+> و`ownedNew(uid)` اللذين تفرضهما كتلة الأمان. الشروط المُدمَجة هي:
+> `id == request.resource.data.id` و`request.resource.data.dedupeKey == id` و`read == false`
+> و`createdDateKey is string`.
+
 ```javascript
-      match /notifications/{id} {
+      // [مرجعي — تُدمَج شروطه لا تُنسخ الكتلة] match /notifications/{id} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid)
           && request.resource.data.ownerUid == uid
@@ -2473,3 +2554,18 @@ export const scheduler = { runNow, lastReport };
 
 > **أي انحراف عن هذه الوثيقة في الكود = عيب يُصلَح. وأي تغيير فيها يحتاج موافقة المالك،
 > وما يمسّ النواة المحاسبية يحتاج ADR جديداً وموافقة مالك النواة.**
+
+---
+
+> تعديل اتساق (تدقيق معماري): §2.4 صُحِّح من **الأحد** إلى **السبت** (`WEEK_STARTS_ON = 6`) لأن
+> `new Intl.Locale('ar-LY').weekInfo` ⇒ `{"firstDay":6,"weekend":[5,6]}` بالقياس الفعلي، فادعاء
+> «الأحد يوافق افتراض ar-LY» كان معاكساً للواقع ومخالفاً لـ 05 §8.6 و09 §9؛ ورُفع «هل يوجد مفتاح
+> `weekStartsOn`؟» لقرار المالك. §2.5 صُحِّح `getDoc(ref,{source:'server'})` — وهو **غير موجود**
+> في الـ SDK المعياري — إلى `getDocFromServer(ref)`، ووُثِّق تعارضه مع القاعدة **B11** في
+> `02-architecture.md` §4.4 مع استثناء مسمّى واحد: `src/data/scheduler/clock.ts`.
+> §15.1 صُحِّحت الإحالة إلى `eslint-plugin-boundaries` ⇒ **ADR-025** (قواعد ESLint الأصلية،
+> بعد رفض الحزمة لثغرتي `handlebars`). §16.1 نُقلت ملكية `worshipDays` إلى 09 وصُحِّح
+> «قابل للحذف» إلى «لا»، ووُثِّق غياب أربعة مسارات عن `03-data-model.md` §1.3 وأثره على التصدير.
+> §16.2 أُعيد توجيهها إلى `04-security.md` §6 بدل النواة §14.3، وأُلغيت كتلتا `tasks` و
+> `worshipDays` المكرَّرتان وحُوِّلت كتلة `notifications` إلى شروط تُدمَج — لأن تكرار `match`
+> على نفس المسار يُقيَّم بـ OR فتفوز الكتلة الأوسع، وهو عين عيب الأسبقية في النواة §14.2.

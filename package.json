@@ -74,7 +74,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:rules": "vitest run --config vitest.rules.config.ts",
+    "test:rules": "firebase emulators:exec --only firestore --project raseed-rules-test \"vitest run --config vitest.rules.config.ts\"",
     "emulators": "firebase emulators:start --only auth,firestore",
     "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
     "deploy:hosting": "firebase deploy --only hosting",

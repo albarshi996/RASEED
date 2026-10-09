@@ -5,7 +5,7 @@
 > **العقد المُلزِم:** `docs/design/01-financial-core.md`. **لا تخالفه هذه الوثيقة في أي حرف.**
 > كل ما يمسّ المال هنا يمرّ عبر `execute(req)` ونقطة الكتابة المالية الوحيدة `postOperation`، لا غير.
 > **المرحلة:** تصميم فقط. لا كود تطبيقي، لا مشروع npm، لا لمس Firebase.
-> **ترقيم ADR في هذه الوثيقة:** `ADR-PW-01 … ADR-PW-16` — فضاء أسماء مستقل (PW = Personal & Worship)
+> **ترقيم ADR في هذه الوثيقة:** `ADR-PW-01 … ADR-PW-22` — فضاء أسماء مستقل (PW = Personal & Worship)
 > لتفادي أي تصادم مع ترقيم النواة (ADR-001…022) أو مع الوثائق الشقيقة.
 > **ترقيم الثوابت:** `P1 … P20` — مستقل عن ثوابت النواة `I1 … I24`.
 
@@ -45,7 +45,10 @@
 
 ### 1.1 الطبقات والحدود المفروضة بأداة البناء
 
-النواة تفرض حدود الطبقات بـ `eslint-plugin-boundaries` (ADR-018). هذه الوحدات تلتزم بالنمط نفسه:
+النواة نصّت في ADR-018 على فرض حدود الطبقات بـ `eslint-plugin-boundaries`، **وقد رُفضت الحزمة**
+لثغرتين حرجتين في `handlebars` تجرّهما اعتمادياتها، واستُبدلت بقواعد ESLint الأصلية
+(`no-restricted-imports`) — **ADR-025** في `02-architecture.md` §4.4، وهو ما يحمله
+`eslint.config.js` القائم فعلاً. هذه الوحدات تلتزم بالنمط نفسه وبالأداة الفعلية لا بالمقترحة:
 
 ```
 src/
@@ -119,7 +122,7 @@ src/
 >
 > **الشكل المعتمد في الواجهة:** بعد نجاح `payObligation`، شريط نتيجة فيه زر واحد:
 > «أكمِل أيضاً مهمة «دفع إيجار أكتوبر»» → يُنفَّذ كـ `completeTask` مستقل. إن أغلق المستخدم الشريط،
-> تبقى المهمة `todo` وتُعرض «متأخرة» — وهذا **صحيح ومقصود**.
+> تبقى المهمة `open` وتُعرض «متأخرة» — وهذا **صحيح ومقصود**.
 
 ---
 
@@ -259,7 +262,8 @@ export function normalizeQuery(q: string): string[];
 > التطبيع يحذف التشكيل ويوحّد الرسم، وهذا **إتلاف** لنص القرآن. القاعدة (الثابت P8): الدالة تُستدعى
 > **فقط** على عناوين ونصوص يكتبها المستخدم وعلى أسماء الكيانات. ويُضاف اختبار صريح: لا استيراد
 > لـ `domain/text/arabic` داخل `domain/worship/quran.ts` ولا في أي مكوّن يعرض نصاً قرآنياً —
-> **مفروض بقاعدة `eslint-plugin-boundaries` لا بمراجعة الكود** (نفس منطق ADR-018).
+> **مفروض بـ `no-restricted-imports` في `eslint.config.js` لا بمراجعة الكود**
+> (ADR-025؛ `eslint-plugin-boundaries` المقترحة في ADR-018 **مرفوضة** لثغرتي `handlebars`).
 
 ### 2.4 قواعد RTL الملزِمة لهذه الشاشات
 
@@ -628,7 +632,7 @@ Firestore المحلية. فنُجري مسح `includes()` على `titleNorm` و
 
 ```ts
 // users/{uid}/tasks/{taskId}            — taskId = randomUUID() أو مفتاح حتمي للمتكررة (4.5)
-export type TaskStatus = 'todo' | 'inProgress' | 'done' | 'cancelled';
+export type TaskStatus = 'open' | 'done' | 'cancelled';   // عقد وثيقة 07 §1.2 — لا رابعة
 export type TaskPriority = 1 | 2 | 3;      // 1 = عالية — **نفس ترتيب Obligation.priority في النواة**
 
 export interface Task extends OwnedDoc {
@@ -638,7 +642,7 @@ export interface Task extends OwnedDoc {
   listId: string | null;              // taskLists
   tags: string[];                     // ≤ 10
 
-  status: TaskStatus;                 // **أربع قيم فقط. لا 'overdue' ولا 'today'** — ADR-PW-10
+  status: TaskStatus;                 // **ثلاث قيم فقط (عقد وثيقة 07). لا 'overdue' ولا 'today' ولا 'inProgress'** — ADR-PW-10
   priority: TaskPriority;
 
   dueDate: DateKey | null;            // null = مهمة بلا موعد («يوماً ما»)
@@ -689,7 +693,7 @@ export interface TaskList extends OwnedDoc {
 
 ### 4.2 «متأخر» و«اليوم» حالات مشتقّة لا مخزَّنة
 
-> **ADR-PW-10 — `status` يحمل أربع قيم فقط؛ «متأخرة» و«اليوم» و«قادمة» تُشتقّ في المحدِّدات.**
+> **ADR-PW-10 — `status` يحمل ثلاث قيم فقط؛ «متأخرة» و«اليوم» و«قادمة» تُشتقّ في المحدِّدات.**
 
 ```ts
 // domain/tasks/derive.ts — نقي 100%
@@ -697,7 +701,7 @@ export type TaskBucket = 'overdue' | 'today' | 'tomorrow' | 'thisWeek' | 'later'
                        | 'done' | 'cancelled';
 
 export function isOverdue(t: Task, today: DateKey): boolean {
-  return (t.status === 'todo' || t.status === 'inProgress')
+  return t.status === 'open'
       && t.dueDate !== null && t.dueDate < today;
 }
 
@@ -717,7 +721,7 @@ export function overdueDays(t: Task, today: DateKey): number;
 
 ```
 query(tasks, where('trashed','==',false),
-             where('status','in',['todo','inProgress']),
+             where('status','==','open'),
              where('dueDate','<', todayKey),
              orderBy('dueDate','asc'), limit(50))
 ```
@@ -735,10 +739,10 @@ query(tasks, where('trashed','==',false),
 | ما يُكمل مهمة | **إجراء واحد صريح**: ضغط مربّع الإكمال، أو زر «أكملتها» في تفاصيل المهمة. لا غير |
 | إكمال كل المهام الفرعية | **لا يُكمل المهمة.** يُعرض شريط: «أُنجزت كل البنود الفرعية. [أكمِل المهمة]» — الإكمال بيد المستخدم (المتطلب 14 نصّاً) |
 | مرور موعد الاستحقاق | **لا يُغيّر الحالة** إطلاقاً. تظهر «متأخرة» فقط |
-| توليد دورة تكرار جديدة | **لا يُكمل الدورة السابقة.** الدورة السابقة تبقى `todo` وتُعرض متأخرة إن فاتت (ADR-PW-11) |
+| توليد دورة تكرار جديدة | **لا يُكمل الدورة السابقة.** الدورة السابقة تبقى `open` وتُعرض متأخرة إن فاتت (ADR-PW-11) |
 | دفع التزام مرتبط | **لا يُكمل المهمة** (ADR-PW-02). اقتراح بزر فقط |
-| إعادة الفتح | مسموح: `status: 'todo'`, `completedAt: null`, `completedOn: null`. يُسجَّل في `auditLogs`؟ **لا** — المهام ليست سجلاً محاسبياً، والقسم 18 بند 9 في المتطلبات يخصّ «التعديلات المالية الحساسة» |
-| «تمّت جزئياً» | **غير موجودة.** الحالات أربع ولا خامسة؛ التقدّم الجزئي يُعبَّر عنه بالمهام الفرعية |
+| إعادة الفتح | مسموح: `status: 'open'`, `completedAt: null`, `completedOn: null`. يُسجَّل في `auditLogs`؟ **لا** — المهام ليست سجلاً محاسبياً، والقسم 18 بند 9 في المتطلبات يخصّ «التعديلات المالية الحساسة» |
+| «تمّت جزئياً» | **غير موجودة.** الحالات ثلاث ولا رابعة، و`inProgress` **محذوفة صراحةً**؛ التقدّم الجزئي يُعبَّر عنه بالمهام الفرعية |
 
 **رسالة الخطأ عند محاولة إكمال مهمة مكتملة** (تزامن جهازين): `TASK_ALREADY_COMPLETED` →
 «هذه المهمة أُكملت من جهاز آخر في {time}.» — لا خطأ صامت ولا كتابة ثانية.
@@ -769,33 +773,40 @@ export function initialKeys(n: number): string[];
 
 ### 4.5 التكرار — المحرّك نفسه، لا محرّك ثانٍ
 
-> **ADR-PW-11 — المهام المتكررة تستخدم `recurrences` ومُشغِّل الاستدراك في النواة بلا أي تعديل في منطقه،
-> بـ `kind: 'task'` ومفتاح حتمي `task:{recurrenceId}:{dueDate}`.**
+> **ADR-PW-11 — محرّك التكرار غير المالي **تملكه** `docs/design/07-recurrence-notifications.md`.
+> هذه الوثيقة **تستهلكه ولا تعيد تعريفه**: القالب في `personalRecurrences/{id}` بـ `kind: 'task' | 'reminder'`،
+> والمفتاح الحتمي `task:{personalRecurrenceId}:{occurrenceKey}`.**
 
-| البند | القرار |
+**مراجعة قرار سابق في هذه الوثيقة:** كانت المسوّدة الأولى تقترح توسيع `RecurrenceRule.kind` في النواة
+بـ `'task'`. **رُجِع عنه** بعد قراءة وثيقة 07 §6.1، وحجّتها أقوى من حجّتي، وأثقلها سببان:
+
+1. **`template` في `recurrences` المالية هو حمولة `OperationRequest`** تُمرَّر إلى `postOperation` —
+   نقطة الكتابة المالية الوحيدة. قالب مهمة ليس `OperationRequest`، وخلطهما في حقل واحد **يفتح باباً
+   لتمرير حمولة غير مالية إلى المسار المالي**. هذا خطر حقيقي لا تعقيد نظري.
+2. **سياسة الحذف معاكسة:** قواعد النواة تضع `recurrences` بـ `allow delete: if false` (قالب مالي سجل
+   دائم)، بينما حذف قاعدة «راجع الفواتير» حقّ طبيعي للمستخدم. التوسيع يُجبرنا على تخفيف قاعدة مالية.
+
+| البند | القرار (من وثيقة 07) |
 |---|---|
-| القالب | `recurrences/{id}` كما هو في النواة 4.9: `frequency`, `interval`, `startDate`, `endDate`, `maxOccurrences`, `dayOfMonthPolicy`, `template`, `status` |
-| `template` للمهام | `{ title, details?, listId, priority, tags, subtasks, reminderOffsetMinutes }` |
-| المعرّف الحتمي | `` `task:${recurrenceId}:${dueDate}` `` — **معرّف مستند المهمة نفسه**، على نمط 6.2 في النواة ⇒ تشغيل المُشغِّل 50 مرة في اليوم = مهمة واحدة |
-| التوليد | داخل `runCatchUp`؛ لكنه **ليس قيداً** ⇒ لا `postOperation` ولا معاملة ⇒ `setDoc` بـ `{merge:false}` يفشل بهدوء إن وُجد المستند… بل **`setDoc` عادي idempotent**: نفس المعرّف ونفس الحمولة ⇒ كتابة واحدة غير مؤذية، والحارس الحقيقي هو قاعدة أمان تمنع تعديل مهمة مكتملة بإعادة توليدها (القسم 11) |
-| عدم إكمال الدورة السابقة | الدورة الجديدة مستند **مستقل**. السابقة تبقى بحالتها — وهذا يحسم عين العيب الذي عالجه ADR-013: ربط التوليد بالإكمال يعني أن مهمة شهرية لم تُكمَل **لا يُولَّد لها الشهر القادم أبداً** |
-| حدّ الاستدراك للمهام | **`maxBackfillDays` للمهام = 7 أيام، وسقف 30 مهمة لكل تشغيل** — لا 120 يوماً |
-| ما قبل الحدّ | يُعرض في قائمة «مواعيد فائتة» يختار منها المستخدم (نفس سلوك النواة 10.4) |
+| القالب | `personalRecurrences/{id}` — `kind`, `frequency`, `interval`, `startDate`, `endDate`, `maxOccurrences`, `dayOfMonthPolicy`, `byWeekday`, `taskTemplate`, `status` |
+| `taskTemplate` | `{ title, notes?, priority, listId?, isReminder, timeOfDayHint? }` — **ليس `OperationRequest` أبداً** |
+| المعرّف الحتمي | `` `task:${personalRecurrenceId}:${occurrenceKey}` `` = **معرّف مستند المهمة** ⇒ تشغيل المُشغِّل 50 مرة في اليوم = مهمة واحدة |
+| الأداة | `writeBatch` (لا `runTransaction`) ⇒ **يعمل دون اتصال** — وهذا مكسب حقيقي يخسره التوحيد مع المسار المالي |
+| النوافذ | **جدول وثيقة 07 §6.4 هو المرجع**: `daily` أمامي 2/خلفي 2، `weekly` 14/21، `monthly` 31/62، `quarterly` 92/120، `yearly` 31/120 |
+| السقوف | `maxOpenGeneratedPerRule = 60`، `maxTasksPerRun = 100` (وثيقة 07) |
+| عدم إكمال الدورة السابقة | الدورة الجديدة مستند **مستقل**؛ السابقة تبقى بحالتها — يحسم عين العيب الذي عالجه ADR-013 |
+| `occurrenceKey` | **غير قابل للتغيير بعد الإنشاء** ولو أجّل المستخدم `dueDate` — شرط صلب من وثيقة 07 §1.2، ومفروض في قواعدي (القسم 11) |
+| الإلغاء لا الحذف | حذف مهمة مُولَّدة **يُعيد توليدها** في الفتحة التالية داخل النافذة. الإلغاء الصحيح `status='cancelled'` — شرط صلب من وثيقة 07 |
 
-**لماذا 7 أيام لا 120:** غياب شهر عن التطبيق بقالب «مهمة يومية» يُنتج **120 مهمة متأخرة** تُفسد كل شاشة
-المهام وكل عدّاد، وهي مهام **لا معنى لإنشائها** (لا أحد «ينجز» مهمة يوم الثلاثاء الماضي). المال مختلف:
-فاتورة الشهر الماضي **حقيقية وتُستحقّ**، فحدّ النواة 120 يوماً صحيح هناك. **السقف مختلف لأن طبيعة
-الكيان مختلفة** — وهذا يحتاج معاملاً لكل `kind` في `planCatchUp`:
+**ورجعت أيضاً عن `taskBackfillDays = 7` الموحَّد:** جدول وثيقة 07 **أدقّ** لأنه يفرّق بالتردد
+(`daily` خلفي **2** يوماً فقط، و`monthly` **62**)، وهو يحقّق قصدي الأصلي (منع 120 نسخة من «اشرب الماء»)
+بدقّة أعلى. ⇒ `settings/personal.tasks.taskBackfillDays` **يُحذف** من إعداداتي
+ويُقرأ من `settings/recurrence` التي تملكها وثيقة 07 (§16.1 هناك؛ وكان مكتوباً هنا خطأً
+`settings/scheduler` — المستند الوحيد باسم `scheduler` هو `meta/scheduler` لحالة المُشغِّل).
 
-> **ثغرة في النواة تخصّ مجالي — مذكورة في `openQuestions`:** توقيع `planCatchUp(rules, today, maxBackfillDays = 120)`
-> يأخذ **سقفاً واحداً لكل الأنواع**، و`RecurrenceRule.kind` يحصر القيم في `'expense' | 'income' | 'obligation'`
-> فلا موضع لـ `'task'`. المطلوب تغييران **إضافيان** (additive) في `01-financial-core.md` بـ ADR جديد:
-> (1) إضافة `'task'` إلى `RecurrenceRule.kind`، (2) تحويل `maxBackfillDays` إلى
-> `Record<RecurrenceKind, number>` بقيم `{ expense:120, income:120, obligation:120, task:7 }`.
-> **لم أعدّل الملف.** وحتى صدور القرار، البديل العاملّ بلا أي مساس بالنواة: مُشغِّل استدراك **ثانٍ**
-> `runTaskCatchUp` في `domain/tasks/` يقرأ من مجموعة مستقلة `taskRecurrences/{id}` بنفس شكل
-> `RecurrenceRule` ويُعيد استخدام دالة `recurrenceNext` النقية. تكلفة البديل: تكرار ≈ 40 سطراً من منطق
-> الجدولة وشاشة تكرار ثانية — ولهذا **التغيير الإضافي في النواة هو المفضَّل**.
+**وما يبقى من قراري الأصلي صحيحاً:** العادات والأذكار **لا تُمادّ** — وهذا ما قرّرته وثيقة 07 نفسها
+(`kind: 'dhikr' | 'prayer' | 'quranWird'` ⇒ «لا شيء يُولَّد»، §7.1 صف 5) ⇒ **اتفاق تام**.
+وقرار 7.4 عندي (العادات لا تستخدم محرّك التكرار إطلاقاً) يبقى سارياً مع تعديل واحد مذكور في القسم 18.
 
 ### 4.6 عرض القائمة والتصفية
 
@@ -807,8 +818,8 @@ export function initialKeys(n: number): string[];
 | القائمة | `listId == x` |
 | الأولوية | `priority == n` |
 | النطاق الزمني | `dueDate >= from && dueDate <= to` |
-| المتأخرة | `status in ['todo','inProgress'] && dueDate < today` |
-| اليوم | `dueDate == today && status in ['todo','inProgress']` |
+| المتأخرة | `status == 'open' && dueDate < today` |
+| اليوم | `dueDate == today && status == 'open'` |
 | بلا موعد | `dueDate == null` |
 | الوسم | `tags array-contains x` |
 | المرتبطة بكيان | `linkedIds array-contains 'obligation:{id}'` |
@@ -1928,8 +1939,8 @@ export interface PersonalSettings {
     defaultListId: string | null;
     defaultPriority: 1 | 2 | 3;            // افتراضي 2
     showCompletedInLists: boolean;         // افتراضي false
-    taskBackfillDays: number;              // افتراضي 7 (4.5)
-    taskBackfillMaxPerRun: number;         // افتراضي 30
+    // **لا `taskBackfillDays` ولا `taskBackfillMaxPerRun` هنا** — نوافذ التوليد وسقوفه
+    // تملكها `settings/recurrence` في وثيقة 07 §16.1 (ADR-PW-11). مصدر واحد للحقيقة.
   };
   trashRetentionReminderDays: number;      // افتراضي 30 — عتبة تذكير لا حذف آلي (3.9)
   updatedAt: Timestamp;
@@ -1944,7 +1955,8 @@ export interface WorshipSettings {
     trackJamaah: boolean;                  // افتراضي true
     /** null = المرحلة الأولى: لا مواقيت إطلاقاً (5.6) */
     times: PrayerTimesConfig | null;
-    remindersEnabled: boolean;             // افتراضي **false** — القسم 13
+    // **لا `remindersEnabled` هنا** — تفعيل `worshipReminder` وساعته في
+    // `settings/notifications` التي تملكها وثيقة 07 (القسم 13 والقسم 18).
   };
   quran: QuranGoal & {
     lastPosition: QuranPosition | null;
@@ -1992,7 +2004,7 @@ export interface WorshipSettings {
 | بحث الملاحظات | 3 طبقات (3.6) | — | استعلام لحظي + مسح محلي |
 | الأرشيف / السلة | `archived==true` / `trashed==true` | تبديل الأعلام، حذف نهائي بـ `writeBatch` | `react-query` |
 | الدفاتر | `notebooks where status=='active' orderBy orderKey` | إنشاء/تعديل/أرشفة + `noteCount` بـ `increment` | `onSnapshot` |
-| مهام اليوم | `tasks where trashed==false && status in [todo,inProgress] && dueDate==today` | `status`, `completedAt` | `onSnapshot` |
+| مهام اليوم | `tasks where trashed==false && status=='open' && dueDate==today` | `status`, `completedAt` | `onSnapshot` |
 | المهام المتأخرة | `... && dueDate < today orderBy dueDate asc` (4.2) | " | `onSnapshot` |
 | كل المهام + فلاتر | جدول 4.6 | " | `react-query` بمفتاح الفلتر |
 | تقويم المهام | `dueDate >= from && <= to` لشهر واحد | منتقي تاريخ | `react-query` بمفتاح `['tasks','month',pk]` |
@@ -2022,9 +2034,23 @@ export interface WorshipSettings {
 
 ## 11. قواعد الأمان — المسوّدة الكاملة للمجموعات الجديدة
 
-تُدمَج في `firestore.rules` **داخل** `match /users/{uid}` في مسوّدة النواة 14.3،
-وتستفيد من دوالها (`isOwner`, `isNonNegInt`, `isPosInt`, `touchedOnly`, `unchanged`,
-`rebuildNotRunning`, `periodNotLocked`).
+تُدمَج في `firestore.rules` **داخل** `match /users/{uid}` في **`04-security.md` §6** — وهو الملف
+القابل للنشر — وتستفيد من دوالها (`isOwner`, `isNonNegInt`, `isPosInt`, `touchedOnly`, `unchanged`,
+`ownedNew`, `ownerFrozen`, `strBetween`, `rebuildNotRunning`, `periodNotLocked`).
+
+> **تصحيح اتساق (تدقيق معماري):** كانت هذه الجملة تقول «في مسوّدة النواة 14.3».
+> **مسوّدة النواة §14.3 لا تُنشر**: فيها العيب القاتل ع-أمن-1 (قراءة `resource.data` في تعبير
+> يُقيَّم عند الإنشاء ⇒ **أول مصروف في أي شهر جديد يُرفَض**، وإنشاء أي التزام يُرفَض)،
+> وهي **ما يحمله `firestore.rules` في جذر المستودع اليوم حرفياً** (389 سطراً، غير منشور).
+> الوجهة الصحيحة لهذه الكتل هي `04-security.md` §6.
+>
+> **وثلاث من مجموعات هذه الوثيقة غائبة عن `04-security.md` §6 أو مسمّاة فيه خطأً:**
+>
+> | في هذه الوثيقة | في `04-security.md` §6 | الحكم |
+> |---|---|---|
+> | `worshipDays/{dateKey}` (§5.1) | `worshipRecords/{dateKey}` | **الاسم المعتمد `worshipDays`** (ADR-PW-15). و`03-data-model.md` §7.1 يسمّيه `worshipRecords/{YYYY-MM}` **مستنداً شهرياً** — وهو ما رفضته §5.2 بالأرقام. تعارض ثلاثي يُحسم لصالح هذه الوثيقة |
+> | `quranSessions/{id}` (§6.2) | `quranProgress/{dateKey}` | **الاسم المعتمد `quranSessions`** (ADR-PW-18). `quranProgress` **لا وجود له** في التصميم المعتمد: التقدّم مشتقّ بالاستعلام لا مخزَّن |
+> | `habits/{id}` (§7.1) · `notes/{id}/content/{docId}` (§3.1) | **لا قاعدة** | المفكرة بمستندين لكل ملاحظة ⇒ بلا قاعدة على المجموعة الفرعية `content` **المحرّر ميت** (`permission-denied`) |
 
 > **تحذير مستفاد من عيب الأسبقية (النواة 14.2):** كل تعبير مركَّب أدناه **مُقوَّس صريحاً**،
 > ولا يوجد `||` بين فرع يفحص الملكية وفرع لا يفحصها. **الشروط الأساسية مشتركة لا بديلة.**
@@ -2099,7 +2125,7 @@ export interface WorshipSettings {
         function taskShapeOk(d) {
           return ownedShapeOk(d)
             && d.title is string && d.title.size() > 0 && d.title.size() <= 200
-            && d.status in ['todo','inProgress','done','cancelled']
+            && d.status in ['open','done','cancelled']
             && d.priority in [1,2,3]
             && (d.dueDate == null || isDateKey(d.dueDate))
             && (d.startDate == null || isDateKey(d.startDate))
@@ -2315,21 +2341,47 @@ export interface WorshipSettings {
           && resource.data.paymentCount == 0;
       }
 
-      // ══════════════════ الإعدادات الجديدة (إحكام فوق قاعدة النواة العامة) ══════════════════
-      match /settings/{docId} {
-        allow read: if isOwner(uid);
-        allow write: if isOwner(uid)
-          && (!(docId in ['personal','worship'])
-              || (request.resource.data.ownerUid == uid
-                  && (docId != 'personal'
-                      || (request.resource.data.weekStartsOn in [0,1,6]
-                          && request.resource.data.hijriOffsetDays in [-1,0,1]))));
-      }
+      // ══════════════════ الإعدادات الجديدة ══════════════════
+      // ⛔ لا تُنسخ هذه الكتلة ككتلة. مسار /settings/{docId} مملوك لـ 04-security.md §6
+      //    (ت-16: قائمة مغلقة + فحص currency و displayDecimals). وما يبقى من هذه الوثيقة
+      //    هو **شرطان يُدمَجان** في تلك الكتلة، وتوسيع قائمتها المغلقة.
+      //
+      // (أ) تُوسَّع القائمة المغلقة في 04-security إلى:
+      //     docId in ['app','profile','notifications','dashboard','security',
+      //               'personal','worship','recurrence']
+      //
+      // (ب) يُدمَج هذا الشرط في create و update هناك:
+      //     && (docId != 'personal'
+      //         || (request.resource.data.weekStartsOn in [0,1,6]
+      //             && request.resource.data.hijriOffsetDays in [-1,0,1]))
+      //
+      // ── [ملغاة] الصيغة السابقة، محفوظة للأثر فقط ──
+      // match /settings/{docId} {
+      //   allow read: if isOwner(uid);
+      //   allow write: if isOwner(uid)
+      //     && (!(docId in ['personal','worship'])
+      //         || (request.resource.data.ownerUid == uid
+      //             && (docId != 'personal'
+      //                 || (request.resource.data.weekStartsOn in [0,1,6]
+      //                     && request.resource.data.hijriOffsetDays in [-1,0,1]))));
+      // }
 ```
 
-**ملاحظة ترتيب:** هذه الكتلة الأخيرة **تستبدل** كتلة `match /settings/{docId}` في مسوّدة النواة 14.3
-(لا تُضاف بجانبها) — لأن تكرار نفس `match` على نفس المسار يُقيَّم بـ OR وقد يُلغي الإحكام.
-**هذا بالضبط نوع العيب الذي عالجته النواة في 14.2، ويُغطّى باختبار محاكي صريح.**
+**ملاحظة ترتيب — صُحِّحت (تدقيق معماري):** النسخة الأولى قالت إن هذه الكتلة «**تستبدل**» كتلة
+`match /settings/{docId}` في مسوّدة النواة 14.3. وهذا **غير قابل للتنفيذ كما كُتب**، لسببين:
+
+1. **لا يوجد «استبدال» في ملف قواعد.** كل كتلة `match` تطابق المسار تُقيَّم، والنتيجة **OR**.
+   فلو أُدرجت بجانب كتلة أخرى، **الأوسع تفوز**.
+2. **والأخطر: هذه الكتلة هي الأوسع، لا الأضيق.** شرطها
+   `isOwner(uid) && (!(docId in ['personal','worship']) || …)` يصير — عند أي `docId` آخر مثل
+   `'app'` — مساوياً لـ `isOwner(uid)` وحده. أي أنها لو أُدرجت بجانب كتلة `04-security.md` §6
+   **لأسقطت** قائمتها المغلقة (ت-16) وفحص `currency == 'LYD'` وفحص `displayDecimals in [0,2,3]`
+   و`ownedNew`/`ownerFrozen` ⇒ `settings/{أي شيء}` يصير مخزناً عاماً بلا تحقق.
+   **وهذا بالضبط عيب الأسبقية الذي عالجته النواة في 14.2، مقلوباً.**
+
+**المعتمد:** كتلة `04-security.md` §6 **هي الوحيدة** على هذا المسار، وتُوسَّع قائمتها ويُدمَج فيها
+الشرطان (أ) و(ب) أعلاه. ويُغطّى باختبار محاكي صريح: كتابة `settings/app` بـ `currency: 'USD'`
+**يجب أن تُرفَض** بعد الدمج — وهو الاختبار الذي يكشف لو عاد التكرار.
 
 **ما تفرضه هذه القواعد فعلاً، وما لا تستطيعه:**
 
@@ -2448,47 +2500,47 @@ taskLists:      status (==) + orderKey ASC
 ⇒ **لا إشعار يصل والتطبيق مغلق، ولا نَعِد المستخدم بذلك.** المتاح:
 تنبيهات داخل التطبيق دائماً + `Web Notifications API` عند منح الإذن **والتطبيق مفتوح**.
 
-### 13.1 المُشغِّل والمعرّفات الحتمية
+### 13.1 المُشغِّل والمعرّفات الحتمية — مملوك لوثيقة 07
 
-> **ADR-PW-22 — كل تنبيه يُولِّده مُشغِّل فتح التطبيق له **معرّف مستند حتمي**
-> `{type}:{entityId}:{bucketKey}`.**
+> **ADR-PW-22 — مركز التنبيهات ومولّدها ومفاتيح إزالة التكرار **تملكها**
+> `docs/design/07-recurrence-notifications.md`. هذه الوثيقة **تستهلكها ولا تعيد تعريفها**،
+> وتُحدِّد فقط **الشروط الدلالية** لتنبيهات مجالها.**
 
-```ts
-// domain/notify/ids.ts  — نقي
-export type PersonalNotificationType =
-  | 'taskDueToday' | 'taskOverdue' | 'taskReminder'
-  | 'zakatHawlApproaching' | 'zakatHawlDue' | 'zakatUnpaid'
-  | 'zakatPriceStale' | 'notesTrashCleanup' | 'missedRecurringTasks';
+**اتفاق تام في المبدأ:** وثيقة 07 تقرّر `notificationId === dedupeKey` (§9.3)، وهو نفس ما وصلت إليه:
+نقل مبدأ `entryId === opId` من النواة إلى التنبيهات ⇒ المُشغِّل يحاول الكتابة 50 مرة على **نفس
+المعرّف** ⇒ **تنبيه واحد**، بلا قفل ولا `lastRunAt` موثوق، ويحقّق المتطلب 17 **بنيوياً**.
 
-/** مثال: 'taskOverdue:7f3a…:2026-10-09'  |  'zakatHawlDue:rec_12:1447' */
-export function notificationId(
-  type: PersonalNotificationType, entityId: string, bucketKey: string
-): string;
-```
+**مراجعة قرارين لي لصالح وثيقة 07:**
 
-**هذا هو الحارس كله.** التطبيق يُفتح 50 مرة في اليوم ⇒ المُشغِّل يحاول الكتابة 50 مرة على **نفس
-المعرّف** بنفس الحمولة ⇒ **تنبيه واحد**، بلا قفل ولا `lastRunAt` موثوق. وهو نقل مباشر لمبدأ
-`entryId === opId` من النواة (6.1) إلى التنبيهات، ويحقّق المتطلب 17 («منع التنبيهات المكررة»)
-**بنيوياً لا بمنطق تطبيقي**.
-
-| النوع | `bucketKey` | التكرار الناتج |
+| ما كنت أقترحه | ما تقرّره وثيقة 07 | لماذا أرجع إليها |
 |---|---|---|
-| `taskDueToday` | `dateKey` اليوم | مرة واحدة في اليوم لكل مهمة |
-| `taskOverdue` | `dateKey` اليوم | مرة واحدة في اليوم، لا في كل فتح |
-| `taskReminder` | `dateKey` + ساعة التذكير | مرة واحدة |
-| `zakatHawlApproaching` | `'approach'` + سنة الحول الهجرية | مرة واحدة لكل حول |
-| `zakatHawlDue` | سنة الحول الهجرية | مرة واحدة لكل حول |
-| `zakatUnpaid` | `periodKey` | مرة واحدة في الشهر، لا تذكير يومي |
-| `zakatPriceStale` | `periodKey` | مرة في الشهر |
-| `notesTrashCleanup` | `periodKey` | مرة في الشهر |
+| `taskOverdue:{taskId}:{dateKey}` — تنبيه **لكل مهمة** بسقف 10 | `task-late:{today}` — **تنبيه مُجمَّع واحد دائماً** | أصحّ: 12 تنبيهاً فردياً يغرق مركز التنبيهات، والسقف الذي اقترحته (10 + مُجمَّع للباقي) هو **تعقيد بلا فائدة** مقابل مُجمَّع واحد من البداية. والمستخدم يريد «لديك 12 مهمة متأخرة» لا 12 صفاً |
+| `taskDueToday:{taskId}:{dateKey}` | `task-today:{today}` مُجمَّع | نفس الحجّة |
+| قائمة أنواع خاصة بي (`PersonalNotificationType`) | **اتحاد واحد مغلق من 24 نوعاً** في `domain/notifications/**` | قائمتان تعنيان مركزَي تنبيهات وجدولَي إعدادات. والاتحاد الواحد المغلق يضمن أن كل نوع له سطر في جدول الشروط ومفتاح إزالة تكرار وسياسة إغلاق |
 
-**السقف:** `taskOverdue` يُولَّد لأقدم **10** مهام متأخرة فقط، ويُجمَع الباقي في تنبيه واحد
-«ولديك {n} مهمة متأخرة أخرى». وإلا كتب المُشغِّل 40 مستنداً في فتحة واحدة.
+**الشروط الدلالية التي تُسهِّلها وثيقة 07 لمجالي** (أُحدِّدها هنا وتُنفَّذ هناك):
+
+| النوع | الشرط | المصدر |
+|---|---|---|
+| `taskDueToday` | `count(tasks: status=='open' && dueDate == today) ≥ 1` | استعلام 4.6 |
+| `taskOverdue` | `count(tasks: status=='open' && dueDate < today) ≥ 1` | استعلام 4.2 |
+| `worshipReminder` | معطَّل افتراضياً + `worshipDays/{today}` **غير موجود** + بعد ساعة يختارها المستخدم | 13.2 |
+
+> **نواقص في اتحاد أنواع وثيقة 07 تخصّ مجالي — في `openQuestions`:** الاتحاد **لا يحوي أي نوع
+> للزكاة** ولا `notesTrashCleanup`. المطلوب إضافة (بـ ADR على وثيقة 07، لا بتعريف اتحاد ثانٍ):
+> `zakatHawlApproaching` (`zakat-hawl-soon:{hijriYear}`)، `zakatHawlDue` (`zakat-hawl:{hijriYear}`)،
+> `zakatUnpaid` (`zakat-unpaid:{periodKey}`)، `zakatPriceStale` (`zakat-price:{periodKey}`)،
+> `notesTrashCleanup` (`notes-trash:{periodKey}`).
+> **وملاحظة مهمة:** وثيقة 07 §20.8 تقرّر «لا تكرار هجري» وتُبقي تذكير حول الزكاة **بتأكيد يدوي
+> سنوي** (سؤالها رقم 3)، وهذا **يعطّل** `zakatHawlApproaching`/`zakatHawlDue` التلقائيين اللذين
+> صمّمتهما في 8.7 و8.10. **لا أفترض جواباً**؛ والسلوك العامل حتى الحسم: بطاقة في شاشة الزكاة
+> ولوحة التحكم تُحسب عند الفتح من `hawlEndAt` (قراءة، بلا كتابة تنبيه) — فلا يفقد المستخدم المعلومة،
+> ولا نكتب تنبيهاً بتاريخ هجري غير محسوم.
 
 **الحقول:** تُكتب في `notifications` (مجموعة النواة، قواعدها في 14.3 جاهزة: `create` للمالك،
 `update` على `read`/`readAt` فقط، و`delete` مسموح لأنها ليست سجلاً محاسبياً).
-كل تنبيه يحمل `level: 'info' | 'warning' | 'critical'`، و`link: { route, params }` للسجل المرتبط
-(المتطلب 17)، و`read: false`.
+و**إعدادات التنبيهات كلها في `settings/notifications`** التي تملكها وثيقة 07 —
+**لا** في `settings/personal` ولا `settings/worship` (انظر القسم 18).
 
 ### 13.2 تذكيرات العبادات — حساسية مقصودة
 
@@ -2525,7 +2577,7 @@ export function notificationId(
 | T11 | حذف ملاحظة غير موجودة في السلة | **القاعدة ترفض** |
 | **المهام** | | |
 | T12 | `status:'done'` و`completedAt:null` | **القاعدة ترفض** — الثابت P4 |
-| T13 | `status:'todo'` و`completedAt` غير فارغ | **القاعدة ترفض** |
+| T13 | `status:'open'` و`completedAt` غير فارغ | **القاعدة ترفض** |
 | T14 | `isOverdue` و`bucketOf` على 12 حالة حدّية (بلا موعد، اليوم، أمس، ملغاة، مكتملة متأخرة) | التصنيف الصحيح، و**مهمة مكتملة ليست متأخرة أبداً** |
 | T15 | إكمال كل المهام الفرعية | `status` **لا يتغيّر** |
 | T16 | تشغيل استدراك المهام 50 مرة في نفس اليوم | **مهمة واحدة** لكل دورة (معرّف حتمي) |
@@ -2606,7 +2658,7 @@ export function notificationId(
 | **P5** | `'overdue'` و`'today'` **لا تُخزَّن أبداً** في أي حقل | الخادم (قائمة القيم) |
 | **P6** | `notes.contentVersion === notes/{id}/content/body.contentVersion`، ولا ارتداد للنسخة | الخادم (منع الارتداد) + فحص عميل |
 | **P7** | `normalizeArabic` idempotent، و`searchTokens.length ≤ 150` | الخادم (السقف) + T2 |
-| **P8** | `normalizeArabic` **لا تُطبَّق** على نص قرآني معروض | **أداة البناء** (boundaries) |
+| **P8** | `normalizeArabic` **لا تُطبَّق** على نص قرآني معروض | **أداة البناء** (`no-restricted-imports` — ADR-025) |
 | **P9** | `ayahCount === idx(to) − idx(from) + 1 ≥ 1` و`pagesTouched ≥ 1` | النطاق + T33 |
 | **P10** | `Σ surah.ayahCount === 6236`، `pages.length === 604`، حدود الصفحات متزايدة صارماً، وبصمة الملف مطابقة | **سكربت الاستيراد (يفشل البناء)** |
 | **P11** | `zakat.dueMinor === mulRate(baseMinor, 250)` عند `isDue`، و`0` عند عدمه | الخادم (`dueMinor == 0` عند `!isDue`) + T39 |
@@ -2707,12 +2759,84 @@ export const notify = { runPersonalNotificationPass, notificationId };
 
 ---
 
-## 17. خلاصة العقد لهذه الوحدات
+## 17. التوفيق مع الوثائق الشقيقة — `07-recurrence-notifications.md`
+
+وثيقة 07 صدرت بالتوازي مع هذه، وهي **تملك** محرّك التكرار غير المالي ومركز التنبيهات، **وتصرّح**
+(§1.2) بأنها «لا تعرّف نموذج المهام الكامل ولا شاشات العبادات»، لكنها نشرت مع ذلك عقداً أدنى
+للمهمة ومخططاً لـ `worshipDays`. فيما يلي **جرد التعارضات حقلاً حقلاً، وقرار كل واحد**.
+لا تعارض مسكوت عنه.
+
+### 17.1 ما تبنّيته من وثيقة 07 (رجعت عن قراري)
+
+| البند | قراري السابق | المعتمد الآن | السبب |
+|---|---|---|---|
+| محرّك تكرار المهام | توسيع `RecurrenceRule.kind` في النواة بـ `'task'` | **`personalRecurrences` مستقلة** (07 §6.1) | `template` المالي حمولة `OperationRequest`؛ خلطه بقالب مهمة يفتح باباً لتمرير حمولة غير مالية إلى المسار المالي. و`allow delete: if false` المالي لا يصلح لقاعدة شخصية |
+| `TaskStatus` | `'todo' \| 'inProgress' \| 'done' \| 'cancelled'` | **`'open' \| 'done' \| 'cancelled'`** (07 §1.2) | المُشغِّل يكتب `'open'`، ومحدِّدات 07 تستعلم `status=='open'` فتُسقط `inProgress`. ويُضاف أن `inProgress` **تناقض حجّتي نفسها** في 4.3 (التقدّم الجزئي بالمهام الفرعية) ⇒ حذفها تحسين لا تنازل |
+| نوافذ التوليد والاستدراك | `taskBackfillDays = 7` موحَّد | **جدول 07 §6.4 بالتردد** (daily 2/2، weekly 14/21، monthly 31/62…) | أدقّ: يحقّق قصدي (منع 120 نسخة من «اشرب الماء») بتمييز التردد. وسقوف `maxOpenGeneratedPerRule=60` و`maxTasksPerRun=100` منها |
+| مفاتيح تنبيهات المهام | تنبيه لكل مهمة بسقف 10 | **`task-today:{today}` و`task-late:{today}` مُجمَّعان دائماً** | أصحّ تجربةً وأرخص كتابةً |
+| اتحاد أنواع التنبيهات | اتحاد خاص بي | **الاتحاد المغلق الواحد في 07** | قائمتان = مركزَا تنبيهات وجدولَا إعدادات |
+| إعدادات التنبيهات | `worship.prayer.remindersEnabled` | **`settings/notifications`** (07) | مصدر واحد للحقيقة |
+| `occurrenceKey` غير قابل للتغيير + الإلغاء لا الحذف للمُولَّدة | غير منصوص عندي | **شرطان صلبان من 07 §1.2**، ومفروضان في قواعدي | حذف مهمة مُولَّدة يُعيد توليدها ⇒ الإلغاء هو الصحيح |
+
+### 17.2 ما أبقيته من تصميمي (مع الحجّة)
+
+النطاق المُسنَد إلى هذه الوثيقة هو نماذج العبادات والقرآن والأذكار والزكاة بالتفصيل،
+ووثيقة 07 تصرّح بأنها لا تعرّف شاشات العبادات. والأهم أن **مخطط 07 لـ `worshipDay` يناقض
+نصّ 07 نفسه** في موضعين:
+
+| الحقل | مخطط وثيقة 07 | المعتمد هنا | الحجّة |
+|---|---|---|---|
+| **حالة الصلاة** | `status: 'onTime' \| 'late' \| 'congregation' \| 'missed'` | `state: 'unset' \| 'onTime' \| 'qada'` **+ `jamaah: boolean`** | **عيبان في مخطط 07:** (1) القيمة `'missed'` **حكم على المستخدم**، وتخرق المتطلب 15 نصّاً، و**تخرق نثر وثيقة 07 نفسه** الذي يقول حرفياً «الغياب يبقى غياب بيانات، لا حكماً. والتقارير تعرض «لم يُسجَّل» لا «لم تُؤدَّ»» — فالمخطط يناقض حجّته. (2) `'congregation'` و`'onTime'` في اتحاد واحد ⇒ **«في وقتها وفي جماعة» لا تُمثَّل**، ويُجبر المستخدم على اختيار أحد وصفين صحيحين معاً. البُعدان **مستقلان** (5.1) |
+| **حضور الصلوات الخمس** | `Partial<Record<...>>` | `Record<...>` كامل بـ `'unset'` | القاعدة تستطيع فرض «المفاتيح الخمسة بالضبط» (الثابت P2) ⇒ لا مستند ناقص الشكل. والغياب يُعبَّر عنه بـ `'unset'` لا بغياب المفتاح، فيستوي التحقق |
+| **الأذكار** | `dhikr: Record<personalRecurrenceId, …>` ⇒ كل ذكر **قاعدة تكرار** | `habits: Record<habitId, …>` + مجموعة `habits/{id}` | وثيقة 07 نفسها تقرّر أن `kind:'dhikr'` **لا يُمادّ شيئاً** (§7.1 صف 5) ⇒ فهي «قاعدة تكرار لا تتكرر»، أي **تعريف عادة في ثوب قاعدة**. ويُضاف: `type: 'counter' \| 'boolean' \| 'quantity'` و`stepValues` و`targetPerDay` (7.1) لا موضع لها في `PersonalRecurrence` |
+| **القرآن** | `quran: Record<string, { unit, amount, goal, note }>` داخل مستند اليوم | مجموعة `quranSessions` بـ `from/to` بالسورة والآية والصفحة | مخطط 07 **لا يحمل موضعاً** (سورة/آية/صفحة) ⇒ **لا يستطيع** تحقيق ما طُلب نصّاً: «نموذج تتبع الورد (سورة/آية/صفحة)» و«أكمل من حيث توقّفت». والمجموع المجرَّد لا يُصحَّح ولا يُدقَّق (6.2) |
+| **الصيام** | غير موجود | `fasting: { state, kind, note }` | مطلوب نصّاً في المهمة وفي المتطلب 15 |
+| `periodKey` على مستند اليوم | غير موجود | موجود ومفروض `== dateKey[0:7]` | يُتيح العرض الشهري باستعلام مفهرس واحد بدل `documentId()` بمدى |
+
+**نقطة اتفاق كاملة تستحق التسجيل:** الوثيقتان وصلتا **مستقلتين** إلى «مستند واحد لكل يوم»
+وإلى رفض «مستند لكل (ذكر، يوم)» ورفض «مستند للشهر»، وبنفس الحجج تقريباً (التكلفة + أن المستند
+الفارغ المُولَّد مسبقاً «ليس بياناً» ويُقرأ لاحقاً كحكم). هذا تقارب يرفع الثقة في القرار.
+
+### 17.3 ما يحتاج حسماً قبل التنفيذ
+
+| # | التعارض | الأثر إن لم يُحسم |
+|---|---|---|
+| 1 | **شكل `worshipDay.prayers`** (جدول 17.2 صف 1 و2) | قاعدتا أمان متعارضتان على نفس المسار؛ وأيهما نُشر أولاً يُسقط كتابات الآخر. **و`'missed'` تخرق المتطلب 15** |
+| 2 | **`dhikr` مقابل `habits`** | مسارا كتابة على نفس الخانة في مستند اليوم |
+| 3 | **القرآن: خانة في مستند اليوم مقابل `quranSessions`** | إن اعتُمد شكل 07 **يسقط متطلب تتبّع الموضع** |
+| 4 | ~~**قاعدة أمان `worshipDays`** معرَّفة في الوثيقتين~~ | **✅ حُسم (تدقيق معماري)** — انظر أدناه |
+| 5 | **أنواع تنبيهات الزكاة** غائبة عن اتحاد 07 + قرار 07 «لا تكرار هجري» | تذكير حول الزكاة لا يعمل تلقائياً (التخفيف في 13.1) |
+
+**التوصية:** تُعتمد **هذه الوثيقة** مرجعاً لمخطط `worshipDays` و`habits` و`quranSessions`
+وقاعدتها الأمنية (للحجج في 17.2)، وتُعتمد **وثيقة 07** مرجعاً للتكرار والتنبيهات والمُشغِّل
+وعقد `TaskRecurrenceContract` (لحجج 17.1).
+
+> **ما نُفِّذ من هذه التوصية (تدقيق معماري):** البند 4 **حُسم تنفيذاً لا اقتراحاً**.
+> أُلغيت من `07-recurrence-notifications.md` §16.2 كتلتا `match /worshipDays` و`match /tasks`
+> المكرَّرتان (وبقي منهما شرطان يُدمَجان في كتلة `tasks` هنا: تجميد `recurrenceId`
+> و`occurrenceKey`)، وحُوِّلت كتلة `notifications` هناك إلى «شروط تُدمَج» لا كتلة ثانية.
+> وأُعيد توجيه كلتا الوثيقتين إلى `04-security.md` §6 كملف القواعد الوحيد القابل للنشر.
+> **جرد التكرار الكامل على مسارات هذه الوثيقة بعد الحسم** — كل مسار تخصّه كتلة واحدة فقط:
+>
+> | المسار | المالك الوحيد |
+> |---|---|
+> | `notes`, `notes/{id}/content`, `notebooks`, `taskLists`, `habits`, `quranSessions`, `worshipDays`, `zakatRecords` | **هذه الوثيقة §11** |
+> | `tasks` | **هذه الوثيقة §11** + شرطا 07 المدموجان + ت-17 من `04-security.md` |
+> | `settings/{docId}` | **`04-security.md` §6** (موسَّعة بشرطَي §9 هنا — انظر نهاية §11) |
+> | `notifications`, `reminders` | **`04-security.md` §6** (موسَّعة بشروط 07 §16.2) |
+>
+> **ما يبقى للمالك:** البنود 1 و2 و3 و5 أعلاه (شكل `prayers`، و`dhikr` مقابل `habits`،
+> وموضع القرآن، وتنبيهات الزكاة) — وكلها **تعارضات مخطَّط لا تعارضات قواعد**، وموقف هذه
+> الوثيقة فيها مُحتجَّ له في 17.2 ولم يُنقَض بشيء في التدقيق.
+
+---
+
+## 18. خلاصة العقد لهذه الوحدات
 
 1. **اتجاه واحد:** هذه الوحدات تقرأ النواة وتناديها، والنواة لا تعرفها. والربط الوصفي يُخزَّن في الطرف الوصفي.
 2. **لا أثر ضمني عابر للمجالات:** إكمال مهمة لا يكتب مالاً، وعملية مالية لا تُكمل مهمة.
 3. **المفكرة:** مستندان لكل ملاحظة، ProseMirror JSON، صفر `innerHTML`، وبحث ثلاثي الطبقات بتطبيع عربي موثَّق.
-4. **المهام:** أربع حالات فقط؛ «متأخر» مشتقّ لا مخزَّن ⇒ صفر كتابات وصفر حاجة إلى مُشغِّل مجدول.
+4. **المهام:** ثلاث حالات فقط (`open|done|cancelled`)؛ «متأخر» مشتقّ لا مخزَّن ⇒ صفر كتابات وصفر حاجة إلى مُشغِّل مجدول.
 5. **التقويم:** مكوّن واحد نبنيه، يخدم أربع شاشات، بتسمية هجرية/ميلادية مزدوجة و RTL مجاني من المتصفح.
 6. **العبادات:** مستند واحد لكل يوم، كتابة واحدة لكل نقرة، تعمل دون اتصال، وبلا حكم ولا تقييم ولا سلسلة تنكسر.
 7. **القرآن:** سجل جلسات والتقدّم مشتقّ؛ وبيانات المصحف من مصدرين متقاطعين بفحوص تفشل البناء؛ ولا نص قرآني قبل تحقّق أحد عشر شرطاً.
@@ -2722,3 +2846,19 @@ export const notify = { runPersonalNotificationPass, notificationId };
 
 > **أي انحراف عن هذه الوثيقة في الكود = عيب يُصلَح. وأي تغيير فيها يحتاج ADR جديداً وموافقة المالك.**
 > **وأي تعارض بينها وبين `01-financial-core.md` ⇒ النواة هي الحاكمة، وهذه الوثيقة تُصحَّح.**
+
+---
+
+> تعديل اتساق (تدقيق معماري): تُرويسة الوثيقة صُحِّحت من `ADR-PW-01 … ADR-PW-16` إلى
+> `… ADR-PW-22` (الترقيم يصل فعلاً إلى 22). §1.1 و§2.3 و§15.1/P8 صُحِّحت الإحالة من
+> `eslint-plugin-boundaries` (ADR-018) إلى **ADR-025** وقواعد ESLint الأصلية
+> `no-restricted-imports` — فالحزمة **رُفضت** لثغرتين حرجتين في `handlebars`، وهو ما يحمله
+> `eslint.config.js` القائم. §4.5 و§9 صُحِّح `settings/scheduler` إلى `settings/recurrence`
+> (المستند الوحيد باسم `scheduler` هو `meta/scheduler`). §11 أُعيد توجيه الكتل إلى
+> `04-security.md` §6 بدل مسوّدة النواة §14.3 غير القابلة للنشر، ووُثِّق تعارض الأسماء الثلاثي
+> (`worshipDays` مقابل `worshipRecords/{YYYY-MM}` في `03-data-model.md`، و`quranSessions`
+> مقابل `quranProgress`) وغياب قاعدتي `habits` و`notes/{id}/content`. وكتلة
+> `match /settings/{docId}` في نهاية §11 **أُلغيت ككتلة** وحُوِّلت إلى شرطين يُدمَجان، لأنها
+> كانت **الأوسع** على مسارها فكانت ستُسقط التشديدين ت-16 وفحص `currency` في `04-security.md`
+> عبر تقييم OR — وهو عيب الأسبقية (النواة §14.2) مقلوباً. §17.3 حُسم البند 4 تنفيذاً، وأُضيف
+> جرد ملكية مسار بمسار يضمن كتلة واحدة لكل مسار.

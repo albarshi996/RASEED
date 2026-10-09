@@ -100,8 +100,26 @@ export type ReportId =
   | 'accountStatement' | 'cashFlow'
   | 'tasks' | 'worship';
 
-/** نطاق شامل الطرفين، بتوقيت المستخدم المحلي، بنفس دلالة `bookedAt` في النواة. */
+/**
+ * نطاق شامل الطرفين، بنفس دلالة `bookedAt` في النواة.
+ * **تصحيح (م-1):** المنطقة الزمنية **ليست** «توقيت المستخدم المحلي» بل **`Africa/Tripoli` مثبَّتة**
+ * (ADR-033 في `02-architecture.md` §11.5 و`05-design-system.md` ت-7). كل `DateKey` و`PeriodKey`
+ * و`today` في هذه الوثيقة تُشتق بـ `APP_TIME_ZONE` حصراً — انظر 17.2.
+ */
 export interface DateRange { fromDate: DateKey; toDate: DateKey; }
+
+/**
+ * **م-2 — تصنيف النطاق.** كل معادلة في القسم 3 دالّة في هذا التصنيف، لا في النطاق الخام.
+ * `wholeMonths` : fromDate = أول يوم شهر و toDate = آخر يوم شهر ⇒ `periods` صالحة.
+ * `partial`     : غير ذلك ⇒ **`periods` ممنوعة**، والمصدر `dailyRollups` أو `postings` (17.1).
+ */
+export type RangeShape = 'wholeMonths' | 'partial';
+export function rangeShape(r: DateRange): RangeShape;
+
+/** **م-3** — كل تقرير يعلن أي مرشّحات تؤثر في صفوفه، لتُحسب الإجماليات بنفسها (17.1). */
+export type RowLevelFilterKey =
+  | 'accountIds' | 'categoryIds' | 'tags' | 'contactIds' | 'kinds'
+  | 'accountTypes' | 'minAmountMinor' | 'maxAmountMinor' | 'statuses';
 
 export interface ReportFilters {
   range: DateRange;
@@ -112,13 +130,20 @@ export interface ReportFilters {
   contactIds?: string[];
   kinds?: EntryKind[];                 // للعرض والتصفية فقط — **لا يُستخدم في أي معادلة** (B10)
   accountTypes?: AccountType[];
-  minAmountMinor?: Minor;
+  minAmountMinor?: Minor;              // يُقارن بـ `entry.totalDebitMinor` — انظر 17.1 قاعدة 6
   maxAmountMinor?: Minor;
+  /**
+   * **م-4 — مطلب مفقود عُولج:** القسم 16 من المتطلبات ينص على «التصفية حسب الحساب والفئة
+   * **والحالة**»، ولم يكن في النوع أي مرشّح حالة. القيم المسموحة لكل تقرير معلنة في سجله:
+   * قيد ⇒ `EntryStatus` · التزام ⇒ `ObligationStatus` · دين ⇒ `DebtStatus` · مهمة ⇒ `TaskStatus`.
+   */
+  statuses?: string[];
   /** الكشوف التدقيقية فقط: تُظهر `reversal` و`reversed`/`replaced`. الافتراضي في الشاشات العادية `false`. */
   includeCorrections?: boolean;
   /** ترتيب الصفوف. القيمة الافتراضية لكل تقرير معلنة في سجله (القسم 6). */
   sort?: { field: string; dir: 'asc' | 'desc' };
-  page?: { cursor: string | null; size: 25 | 50 | 100 | 250 };
+  /** **تصحيح (م-6):** الحد الأعلى **100** لا 250 — تناقض مع جدول 10.2 («حجم الصفحة ≤100»). */
+  page?: { cursor: string | null; size: 25 | 50 | 100 };
 }
 
 /** يُعرض حرفياً للمستخدم في لوحة «مصدر هذا الرقم» — تطبيق القسم 25 بند 5. */
@@ -127,7 +152,7 @@ export interface DataSourceRef {
     | 'periods' | 'dailyRollups' | 'accountPeriods' | 'budgetPeriods'
     | 'postings' | 'journalEntries' | 'accounts'
     | 'obligations' | 'debts' | 'financialGoals'
-    | 'tasks' | 'worshipRecords' | 'quranProgress';
+    | 'tasks' | 'worshipDays' | 'quranSessions';          // م-16: المجموعتان الفعليتان من `09` §5.1 و§6.1
   /** نصّ الاستعلام كما يُنفَّذ، للعرض والتوثيق. */
   query: string;
   aggregate: 'none' | 'sum' | 'count';
@@ -152,6 +177,22 @@ export interface RatioValue {
   sourceIndex: number;
 }
 
+/**
+ * **م-5 — فجوة أنواع عُولجت:** `MetricValue.valueMinor` من نوع `Minor`، لكن تقارير R16/R17 و
+ * `entryCount` و«صفحات القرآن» و«عدد الدائنين» **ليست مبالغ**. تقديمها كـ `Minor` يجعل منسّق
+ * العملة يطبع «200.000 د.ل» لعدد مهام = 200. لذلك كل رقم غير نقدي من هذا النوع، ومنسّقه
+ * `formatCount` لا `formatLYD`.
+ */
+export interface CountValue {
+  count: number | null;                 // عدد صحيح ≥ 0
+  unitAr: 'عملية' | 'مهمة' | 'يوم' | 'صلاة' | 'صفحة' | 'آية' | 'جهة' | 'التزام' | 'دين' | 'هدف';
+  basis: MetricBasis;
+  nullReasonAr?: string;
+  sourceIndex: number;
+}
+
+export type ReportCell = MetricValue | RatioValue | CountValue;
+
 export interface ReportDriftRow {
   scope: 'period' | 'day' | 'account' | 'budget' | 'obligation' | 'debt' | 'goal';
   key: string;                          // periodKey | dateKey | accountId …
@@ -166,6 +207,17 @@ export interface ReportIntegrityStamp {
   projectionVersion: number;
   ledgerFingerprint: { sumTotalDebitMinor: Minor; entryCount: number };
   verdict: 'matched' | 'drift' | 'notChecked';
+  /**
+   * **م-7 — سبب `notChecked` كان غير معرَّف** (غموض يمنع التنفيذ). القيم الحصرية:
+   *  'offline'        : لا اتصال ⇒ `getAggregateFromServer` **غير متاح أصلاً** (17.3)
+   *  'aggregateError' : فشل التجميع (فهرس ناقص، مهلة، حصة)
+   *  'rebuildRunning' : `meta/integrity.rebuildStatus === 'running'` ⇒ الأرقام في طور الإصلاح
+   *  'userDeferred'   : المستخدم اختار [تجاهل مؤقتاً] في هذه الجلسة
+   *  'notApplicable'  : تقرير لا مُجمَّع له (R16/R17) ⇒ لا ثابت يُفحص
+   */
+  notCheckedReason?: 'offline' | 'aggregateError' | 'rebuildRunning' | 'userDeferred' | 'notApplicable';
+  /** **م-8** — بصمة ثانية بعد الفحص؛ اختلافها عن الأولى ⇒ كتابة تزامنت مع الفحص ⇒ إعادة محاولة (17.4). */
+  fingerprintAfter?: { sumTotalDebitMinor: Minor; entryCount: number };
   driftRows: ReportDriftRow[];
   /** تُطبع في تذييل كل ملف مُصدَّر. */
   stampTextAr: string;
@@ -179,6 +231,15 @@ export interface ReportResult<Row, Totals> {
   rows: Row[];
   /** إجماليات الفترة كاملةً — **لا إجماليات الصفحة** (P2). */
   totals: Totals;
+  /**
+   * **م-9 — أخطر ثغرة في النسخة السابقة:** الإجماليات كانت تُقرأ من `periods` دائماً، بينما
+   * الصفوف تُصفَّى بـ `categoryIds`/`tags`/`accountIds`/`kinds`/`statuses`/`minAmountMinor`.
+   * الأثر: **تقرير مُصفَّى يعرض إجمالي غير مُصفَّى** ⇒ خرق مباشر لـ P2 و R-I7 و«مطابقة التقارير
+   * للعمليات» (القسم 23 بند 12). القاعدة الحاسمة في 17.1.
+   */
+  totalsStrategy: 'aggregateDocs' | 'serverAggregate' | 'loadedRows';
+  /** المرشّحات النشطة التي أثّرت في اختيار الاستراتيجية — تُعرض في رأس التقرير. */
+  activeRowFilters: RowLevelFilterKey[];
   charts: ChartSpec[];
   sources: DataSourceRef[];
   integrity: ReportIntegrityStamp;
@@ -236,7 +297,8 @@ export interface ReportIO {
   listDebts(spec: DebtQuerySpec): Promise<Debt[]>;
   listGoals(): Promise<FinancialGoal[]>;
   listTasks(spec: TaskQuerySpec): Promise<TaskDoc[]>;
-  listWorship(range: DateRange): Promise<{ worship: WorshipRecord[]; quran: QuranProgress[] }>;
+  /** م-16: `worshipDays/{dateKey}` و`quranSessions/{id}` — لا `worshipRecords`/`quranProgress`. */
+  listWorship(range: DateRange): Promise<{ worshipDays: WorshipDay[]; quranSessions: QuranSession[] }>;
 }
 ```
 
@@ -273,9 +335,15 @@ export function divCeilMinor(a: Minor, n: number): Minor {
 }
 
 // domain/money/rate.ts  (إضافة — غلاف آمن حول ratioBps من النواة)
-/** يُرجع null عند مقام صفري أو مفقود — P5. **لا يُرجع 0 ولا Infinity.** */
+/**
+ * يُرجع null عند مقام صفري أو مفقود — P5. **لا يُرجع 0 ولا Infinity.**
+ * **تصحيح (م-10):** المقام **السالب** كان يمرّ فينتج نسبة مقلوبة الإشارة بلا أي كشف
+ * (مثال: `householdShareBps` على فترة مقلوبة الإشارة، أو سقف ميزانية تالف). المقام السالب
+ * **ليس حالة مشروعة في أي معادلة من القسم 3** ⇒ `null` + سبب يُعرض، ويُرفع كانحراف.
+ */
 export function safeRatioBps(part: Minor, whole: Minor | null | undefined): Bps | null {
   if (whole === null || whole === undefined || whole === 0) return null;
+  if (whole < 0) return null;          // ← م-10
   return ratioBps(part, whole);
 }
 
@@ -344,10 +412,29 @@ catVarianceMinor(P,c) = categories[c].spentMinor − categories[c].limitMinor
    والعرض **«لم تُحدَّد ميزانية لهذا الشهر»** — لا 0% ولا 100% ولا «∞» (قاعدة النواة الصلبة على `budgetPeriods`).
 2. **لا تقليم (clamp) للنسبة عند 100%.** 112% تُعرض 112% بلون التجاوز؛ شريط التقدم هو ما يُقلَّم بصرياً.
 3. **ما يُستثنى من `spentMinor` هيكلياً:** أقساط التمويل (`nature='financing'` لا تلمس `budgetPeriods`
-   إطلاقاً)، والتحويلات والاقتراض والسداد والتحصيل، **وتصحيحات الفترات المُقفلة** (النواة: `budgetPeriods`
-   لا تُلمس في تصحيح فترة مُقفلة). ⇒ **نتيجة مُعلَنة:** ميزانية شهر مُقفل لا تتغير بعد إقفاله،
-   وهذا مقصود، ويُكتب في تذييل تقرير الميزانية.
+   إطلاقاً)، والتحويلات (إلا العمولة) **والاقتراض النقدي** والسداد والإقراض والتحصيل،
+   **وتصحيحات الفترات المُقفلة** (النواة: `budgetPeriods` لا تُلمس في تصحيح فترة مُقفلة).
+   ⇒ **نتيجة مُعلَنة:** ميزانية شهر مُقفل لا تتغير بعد إقفاله، وهذا مقصود، ويُكتب في تذييل تقرير
+   الميزانية.
+   > **تصحيح اتساق (تدقيق مالي):** كانت العبارة «والاقتراض» مُطلَقة، وهي **تخالف جدول الحقيقة
+   > R6 في النواة §9**: حالة (ب) «شراء بالأجل» قيدها `Dr expense.{cat} / Cr liability.payable`
+   > ⇒ النواة تنصّ صريحاً على `budgetPeriods: (ب) فقط: spentMinor += X`. فالمستبعَد هو
+   > **الاقتراض النقدي (حالة أ)** الذي لا سطر مصروف فيه، لا الاقتراض بإطلاقه. والقاعدة الحاكمة
+   > واحدة في الحالتين: **الاستهلاك يتبع وجود سطر على حساب `expense`، لا `kind`** (R11).
 4. `spentMinor ≥ 0` دائماً (ثابت النواة I16). قيمة سالبة ⇒ انحراف يُعرض لا يُخفى.
+5. **م-11 — نتيجة حاسمة كانت غائبة: `overallSpentMinor ≠ E(P)`.** قاعدة النواة الصلبة على
+   `budgetPeriods` (§4.7) تمنع أي كتابة ميزانية لفئة بلا `limitMinor` ⇒ `overallSpentMinor`
+   **لا يضم إلا إنفاق الفئات المسقوفة**. فـ «نسبة استهلاك الميزانية» **ليست** «نسبة ما أنفقته من
+   مصروف الشهر»، والفرق إنفاق خارج أي سقف. المعادلتان الجديدتان (ثابت جديد R-I10):
+```
+unbudgetedSpendMinor(P) = E(P) − budgetPeriods[P].overallSpentMinor        // ≥ 0 دائماً
+unbudgetedByCategory(P) = { c: periods[P].expenseByCategory[c]
+                            | c ∉ keys(budgetPeriods[P].categories) }
+```
+   **R-I10:** `0 ≤ overallSpentMinor ≤ E(P)`، و`unbudgetedSpendMinor === Σ unbudgetedByCategory`.
+   القيمة السالبة أو التجاوز ⇒ انحراف يُعرض. وبطاقة C12 تحمل نصاً إلزامياً تحتها:
+   **«محسوبة على الفئات المسقوفة فقط — إنفاق بلا سقف: … د.ل»**.
+   (قبل هذا التصحيح كان المستخدم يقرأ «استهلاك 45%» وقد أنفق ضعف ذلك في فئات لا سقف لها.)
 
 ### 3.5 نسبة تقدم الهدف والمطلوب شهرياً
 
@@ -361,6 +448,19 @@ goalRemainingMinor(g)= max(0, g.targetMinor − goalSavedMinor(g))
 monthsLeft(g, today) = max(1, fullMonthsBetween(today, g.targetDate))            // targetDate غائب ⇒ null
 requiredPerMonth(g)  = g.targetDate ? divCeilMinor(goalRemainingMinor(g), monthsLeft(g, today)) : null
 ```
+**تصحيح (م-12) — `targetDate` في الماضي:** `fullMonthsBetween` يعطي عدداً **سالباً**، و`max(1, …)`
+كان يحوّله إلى 1 ⇒ التقرير يعرض «المطلوب شهرياً = كل المتبقي» كأن الهدف يستحق هذا الشهر، **ويُخفي
+أن موعد الهدف مضى**. القاعدة المعتمدة:
+```
+monthsLeft(g, today) = g.targetDate == null        ? null
+                     : g.targetDate <  today       ? 0        // ← حالة ثالثة صريحة
+                     : max(1, fullMonthsBetween(today, g.targetDate))
+requiredPerMonth(g)  = monthsLeft == null ? null
+                     : monthsLeft === 0   ? null              // + نصّ «تجاوز تاريخ الهدف بـ N يوماً»
+                     : divCeilMinor(goalRemainingMinor(g), monthsLeft)
+```
+و`monthsLeft === 0` ⇒ شارة **«متأخر عن موعده»** في R13 و C11، وإدخاله في إجمالي «الأهداف المتأخرة».
+
 **استثناءات:** `targetMinor === 0` ⇒ `null` + «الهدف بلا قيمة محدَّدة».
 `status ∈ {paused, cancelled}` ⇒ يُعرض لكن يُستثنى من إجمالي «المبالغ المخصصة للادخار».
 **تنبيه عرض إلزامي (من النواة):** في `virtualEarmark`: «مخصص دفترياً، والمال لا يزال في حسابك».
@@ -370,8 +470,19 @@ requiredPerMonth(g)  = g.targetDate ? divCeilMinor(goalRemainingMinor(g), months
 
 ```
 ΔCash(P) = Σ_{a ∈ cashLikeAccounts} accountPeriods[`${a.id}__${P}`].netMinor
-           // cashLikeAccounts = accounts.filter(isCashLike && isPostable && !excludeFromNetWorth)
+           // cashLikeAccounts = accounts.filter(spendableSet)   ← **نفس مجموعة 06 §8.1 حرفياً**
+           //   spendableSet(a) = a.isCashLike && a.isPostable && !a.excludeFromNetWorth
+           //   **بلا أي مرشّح `status`** — انظر التصحيح أدناه
 ```
+
+> **تصحيح اتساق (تدقيق مالي) — مرشّح واحد لا ثلاثة:** كانت المجموعة تُكتب بثلاث صور مختلفة:
+> النواة §R9 و§5.3 و§3.9 هنا بـ `isCashLike && status==='active' && isPostable`، وهذه المعادلة بـ
+> `isCashLike && isPostable && !excludeFromNetWorth`، وجدول 3.13 يُضيف «الحسابات المؤرشفة» إلى
+> المستبعَد. **والمرشّح `status==='active'` هنا يكسر الجسر:** حساب مصرفي فيه حركة في الفترة ثم
+> أُرشف ⇒ حركته تختفي من `ΔCash` ⇒ `UnclassifiedMinor` يصير **غير صفري بلا سبب حقيقي** ويبقى كذلك
+> في كل تقرير لاحق. والأرشفة **قرار عرض لا قرار محاسبي** (العقد §11.5: «الأرشفة لا تمسّ الرصيد»)،
+> ولهذا حسمها `06-module-map.md` §8.1/ر-8: **المرشّح الوحيد المسموح في أي رقم ثروة أو حركة هو
+> `excludeFromNetWorth`**. فوُحِّدت 3.6 و3.9 و3.13 على `spendableSet` من 06 §8.1.
 `netMinor` للحساب الأصل = `debitMinor − creditMinor` ⇒ `ΔCash` **دقيق ورخيص** (قراءة واحدة لكل حساب نقدي).
 
 **الجسر المُصنَّف (من `periods`، بقراءة واحدة):**
@@ -388,8 +499,14 @@ UnclassifiedMinor(P) = ΔCash(P) − ClassifiedNet(P)      ← **يُعرض دا
 والجزء التمويلي هو `financingPaidMinor` وهو مطروح مرة واحدة. الطرح مرتين خطأ شائع — ممنوع.
 
 **ما يُنتج فرقاً غير مُصنَّف (كل الحالات معروفة ومُعلَنة):**
-شراء بالأجل (مصروف بلا نقد)، قيد افتتاحي داخل الفترة، تسوية جرد على حساب نقدي،
-مصروف مدفوع من حساب غير نقدي، دخل مُسجَّل على حساب `receivable`.
+شراء بالأجل (مصروف بلا نقد — R6/ب)، **شطب مستحق (`debtWriteOff`: مصروف `expense.baddebt` بلا أي
+حركة نقدية — R7)**، قيد افتتاحي داخل الفترة، تسوية جرد على حساب نقدي، مصروف مدفوع من حساب غير
+نقدي، دخل مُسجَّل على حساب `receivable`.
+
+> **تصحيح اتساق (تدقيق مالي):** كان **شطب المستحق** غائباً عن هذه القائمة مع أن النواة §9/R7
+> تنصّ عليه صريحاً: `Dr expense.baddebt / Cr asset.receivable` ⇒ `E(P) += X` و`ΔCash = 0`
+> ⇒ `UnclassifiedMinor = +X` حتماً. وغيابه يجعل سطر «فرق غير مُصنَّف» يظهر بلا تفسير مُعلَن
+> في أول شهر فيه شطب، وهو بالضبط ما تمنعه القاعدة أدناه.
 
 **القاعدة:** `UnclassifiedMinor ≠ 0` ⇒ سطر «فرق غير مُصنَّف» + زر **[فسِّر هذا الفرق]** يقرأ قيود
 الفترة (تكلفة معروضة مسبقاً) ويعرض القيود المسؤولة. **لا إخفاء ولا ضمّ للفرق في سطر آخر.**
@@ -397,7 +514,10 @@ UnclassifiedMinor(P) = ΔCash(P) − ClassifiedNet(P)      ← **يُعرض دا
 ### 3.7 متوسط الإنفاق اليومي والإسقاط
 
 ```
-daysElapsed(P, today) = isCurrentMonth(P) ? dayOfMonth(today) : daysInMonth(P)
+// م-13: الفترة المستقبلية كانت تقسم على daysInMonth فتُنتج «متوسطاً» و«توقعاً» = 0 بثقة.
+daysElapsed(P, today) = P >  currentPeriodKey ? null                    // فترة مستقبلية
+                      : P === currentPeriodKey ? dayOfMonth(today)      // بتوقيت Africa/Tripoli
+                      : daysInMonth(P)
 avgDailyExpense(P)    = divRoundMinor(E(P), daysElapsed(P, today))          // basis: 'derived'
 projectedMonthEnd(P)  = avgDailyExpense(P) × daysInMonth(P)                 // basis: 'projected'
 avgDailyExpense(range)= divRoundMinor(E(range), inclusiveDayCount(range))
@@ -406,6 +526,8 @@ avgDailyExpense(range)= divRoundMinor(E(range), inclusiveDayCount(range))
 لأن يوماً بلا إنفاق إنفاقه صفر، وحذفه من المقام يرفع المتوسط كذباً.
 **قاعدة:** `projectedMonthEnd` **لا تُجمَع مع أي رقم فعلي ولا تُصدَّر في جدول الحركات**؛
 مكانها بطاقة أو خط منقّط في المخطط بشارة «تقديري».
+**م-13 (تكملة):** `daysElapsed === null` ⇒ المتوسط والتوقع `null` بسبب «الفترة لم تبدأ بعد»،
+**لا صفر**. وفي الشهر الجاري يوم 1: المقام = 1 (لا صفر) فلا قسمة على صفر.
 
 ### 3.8 معدل الادخار
 
@@ -414,8 +536,10 @@ avgDailyExpense(range)= divRoundMinor(E(range), inclusiveDayCount(range))
 savingsRateBps(P)  = safeRatioBps(I(P) − E(P), I(P))                    // سالب مسموح = عجز
 
 // التعريف الثاني (المخصَّص فعلاً) — يُعرض بجانبه لا بدلاً منه
+// م-14: `PostingAggSpec.accountId` حقل **مفرد** لا مصفوفة ⇒ النداء التالي كان غير قابل للتنفيذ.
+// الصيغة الصحيحة: نداء لكل حساب حجز (≤10 أهداف ⇒ ≤20 قراءة)، أو نداء واحد بـ goalId.
 allocatedSavingsMinor(P) =
-      Σ sumPostings({ periodKey: P, accountId: earmarkAccountIds }).sumSignedMinor   // أهداف الحجز
+      Σ_{a ∈ earmarkAccountIds} sumPostings({ periodKey: P, accountId: a }).sumSignedMinor
     + Σ_{g.mode==='backedAccount'} accountPeriods[`${g.backingAccountId}__${P}`].netMinor
 allocatedSavingsRateBps(P) = safeRatioBps(allocatedSavingsMinor(P), I(P))
 ```
@@ -427,13 +551,23 @@ allocatedSavingsRateBps(P) = safeRatioBps(allocatedSavingsMinor(P), I(P))
 ### 3.9 صافي الثروة والأرصدة (من لقطة `accounts`، 0 قراءات إضافية)
 
 ```
-availableCashMinor   = Σ balanceMinor  where isCashLike && status==='active' && isPostable
+spendableSet(a)      = a.isCashLike && a.isPostable && !a.excludeFromNetWorth
+availableCashMinor   = Σ balanceMinor  where spendableSet(a) && (a.status==='active' || a.balanceMinor !== 0)
 spendableCashMinor   = Σ (balanceMinor − earmarkedMinor)  لنفس المجموعة
-totalReceivablesMinor= Σ balanceMinor  where subtype==='receivable'
-totalPayablesMinor   = Σ balanceMinor  where subtype ∈ {payable, financing}
-netWorthMinor        = Σ assets − Σ liabilities   (باستثناء excludeFromNetWorth)
+totalReceivablesMinor= Σ balanceMinor  where subtype==='receivable' && !excludeFromNetWorth
+totalPayablesMinor   = Σ balanceMinor  where type==='liability'    && !excludeFromNetWorth
+netWorthMinor        = Σ assets − Σ liabilities   (باستثناء excludeFromNetWorth، وبلا أي مرشّح status)
 ```
-(هذه الخمس **موجودة في النواة §R9 حرفياً** وتُستدعى كما هي — لا إعادة تعريف.)
+**المصدر المُلزِم:** هذه الخمس **مُعرَّفة في `06-module-map.md` §8.1** (`domain/selectors/wealth.ts`)،
+وهي **النسخة المصحَّحة** لدوال النواة §R9، وتُستدعى كما هي — لا إعادة تعريف ولا نسخة ثانية هنا.
+
+> **تصحيح اتساق (تدقيق مالي):** كانت هذه الكتلة تُنسَخ من النواة §R9 مع جملة «موجودة في النواة
+> §R9 حرفياً»، **وهي لم تكن حرفية ولا مطابقة**: 06 §8.1 حسم بـ(ر-8) أن **المرشّح `status==='active'`
+> يُسقط رصيد حساب مؤرشف من «الأموال المتاحة» وصافي الثروة بلا أي قيد** ويكسر الثابت M-I9، فأبدله
+> بـ`excludeFromNetWorth` وحده. وحسم بـ(ر-9) أن `totalPayablesMinor` يشمل `zakatDue` (كل
+> `type==='liability'`) وإلا تناقضت بطاقة «الديون عليّ» مع مكوّن الخصوم في «صافي الثروة» في شاشة
+> واحدة — **وهذا الانحراف عن §5.3 من العقد ينتظر إقرار المالك (06 §17.2/ي)**، وحتى الإقرار تُعرض
+> الزكاة في سطر فرعي داخل البطاقة.
 
 ### 3.10 مصاريف المنزل
 
@@ -448,6 +582,17 @@ householdShareBps(P)= safeRatioBps(HouseholdE(P), E(P))
 householdLimitMinor(P) = Σ_{c ∈ homeCategoryIds} budgetPeriods[P].categories[c]?.limitMinor ?? 0
 householdSpentMinor(P) = Σ_{c ∈ homeCategoryIds} budgetPeriods[P].categories[c]?.spentMinor ?? 0
 ```
+**م-15 — `homeCategoryIds` كان غير معرَّف** (جملة لا يستطيع مبرمج تنفيذها). التعريف المعتمد،
+من لقطة الفئات الحيّة بـ **0 قراءات إضافية**:
+```ts
+// src/domain/reports/formulas/household.ts
+/** فئة منزلية = حسابها تحت شجرة `expense.home.` (النواة §3.4: لكل فئة حساب، و§3.5 لشجرة المنزل). */
+export function homeCategoryIds(categories: readonly Category[]): string[] {
+  return categories.filter((c) => c.accountCode.startsWith('expense.home.')).map((c) => c.id);
+}
+```
+**لا قائمة مُثبَّتة في الكود ولا وسم ثانٍ:** إضافة فئة منزلية جديدة تدخل التقرير تلقائياً،
+وفئة أُعيد تصنيفها تخرج منه **من تاريخ إعادة التصنيف فقط** — وهذا قصور مُعلَن (القسم 13 بند 11).
 > **تنبيه دقيق:** `householdSpentMinor` (من الميزانية) قد يختلف عن `HouseholdE` (من الوسم `household`)
 > لأن الأول بالفئة والثاني بالوسم، ومصروف موسوم `household` في فئة «الصحة» يدخل الثاني لا الأول.
 > **الحل المعتمد:** تقرير المنزل يعرض **محورين معنونين**: «بالوسم» و«بفئات المنزل»، ويشرح الفرق
@@ -479,24 +624,63 @@ expectedCollection(n days)= Σ remainingMinor where direction==='receivable'
 
 ### 3.12 المهام والعبادات
 
-```
-// مهام (tasks)
-completedCount(range)  = count(tasks where completedAt ∈ range)                  // الإكمال الصريح فقط
-openCount(today)       = count(tasks where status ∈ {todo, doing})
-overdueCount(today)    = count(tasks where status ∈ {todo, doing} && dueDate < today)
-completionRateBps(range)= safeRatioBps(completedCount, completedCount + overdueCount + dueInRangeOpenCount)
-onTimeRateBps(range)   = safeRatioBps(count(completedAt ≤ dueDate), completedCount)
-avgLagDays(range)      = mean(diffDays(completedAt, dueDate))                    // تقديري، للعرض
+> **⚠ م-16 — هذا القسم كان مبنياً على عقد مُتخيَّل.** صدرت `docs/design/09-personal-worship.md`
+> وثبَّتت النماذج الفعلية، وهي **مختلفة في المجموعة والحقول والقيم**. الصيغ أدناه **مُصحَّحة
+> ومُلزِمة**، والنسخة القديمة (`worshipRecords`، `state:'performed'|'missed'|'unrecorded'`،
+> `quranProgress.pages`، `status:'doing'`) **باطلة ولا تُنفَّذ**. التفصيل الكامل في 17.6.
 
-// عبادات (worshipRecords) — لغة محايدة إلزامية
-recordedPrayers(range) = count(worshipRecords.prayers where state ≠ 'unrecorded')
-performedPrayers(range)= count(state === 'performed')
-adherenceBps(range)    = safeRatioBps(performedPrayers, recordedPrayers)   // ← المقام **المسجَّل فقط**
-unrecordedDays(range)  = count(days with zero records)
-quranPagesMinor?       = لا — صفحات القرآن **عدد صحيح عادي لا Minor**
-quranPages(range)      = Σ quranProgress[d].pages
-quranGoalBps(range)    = safeRatioBps(Σ pages, dailyGoalPages × inclusiveDayCount(range))
-streakDays(today)      = أطول تتابع أيام فيها سجل مكتمل حتى اليوم
+```
+// ── مهام (users/{uid}/tasks) — العقد من 09 §4.1 ──
+// TaskStatus = 'todo' | 'inProgress' | 'done' | 'cancelled'      ← **لا 'doing'**
+// completedOn: DateKey | null  ← اليوم المحلي للإكمال، **وهو مفتاح تقرير الإنجازات** لا completedAt
+// trashed: boolean             ← **إلزامي في كل مرشّح**، وإلا حُسبت مهام السلة
+completedCount(range)   = count(tasks where !trashed && status=='done' && completedOn ∈ range)
+openCount(today)        = count(tasks where !trashed && status ∈ {todo, inProgress})
+overdueCount(today)     = count(tasks where !trashed && status ∈ {todo, inProgress}
+                                       && dueDate != null && dueDate < today)
+dueInRangeOpenCount(range) = count(tasks where !trashed && status ∈ {todo, inProgress}
+                                            && dueDate ∈ range)
+// م-17: المقام القديم خلط عدّاً لحظياً (overdueCount بتاريخ اليوم) بعدٍّ على نطاق ⇒ نسبة
+// تتغيّر بمرور اليوم على نطاق مُقفل. المقام الآن **كله على النطاق**:
+dueInRange(range)       = count(tasks where !trashed && dueDate ∈ range
+                                       && status ∈ {todo, inProgress, done})
+completionRateBps(range)= safeRatioBps(count(done && dueDate ∈ range), dueInRange(range))
+onTimeRateBps(range)    = safeRatioBps(count(done && completedOn ≤ dueDate && dueDate ∈ range),
+                                       count(done && dueDate ∈ range))
+// م-18: mean على مهام dueDate === null كان يُنتج NaN (خرق T-RPT-EMPTY). المقام مُقيَّد صريحاً:
+avgLagDays(range)       = let S = tasks where done && completedOn ∈ range && dueDate != null in
+                          S.length === 0 ? null : divRoundMinor(Σ diffDays(completedOn, dueDate), S.length)
+// المهام بلا موعد («يوماً ما») تُعرض بعددها ولا تدخل أي نسبة التزام بالموعد.
+
+// ── عبادات (users/{uid}/worshipDays/{dateKey}) — العقد من 09 §5.1 ──
+// PrayerRecord = { state: 'unset' | 'onTime' | 'qada'; jamaah: boolean; ... }
+// **لا 'performed' ولا 'missed'.** غياب المستند = «لم تُسجَّل» (09 §5.3) — وهو المعنى المعتمد.
+recordedPrayers(range)  = count(prayers where state != 'unset')
+onTimePrayers(range)    = count(state === 'onTime')
+qadaPrayers(range)      = count(state === 'qada')
+jamaahPrayers(range)    = count(state != 'unset' && jamaah === true)
+// المقام **المسجَّل فقط** — ولا لفظ تقييمي:
+onTimeShareBps(range)   = safeRatioBps(onTimePrayers, recordedPrayers)
+recordedDays(range)     = count(أيام لها مستند worshipDays فيه صلاة واحدة state != 'unset')
+unrecordedDays(range)   = inclusiveDayCount(range) − recordedDays(range)   // يُعرض بعدده
+
+// ── القرآن (users/{uid}/quranSessions) — العقد من 09 §6.1، سجل **جلسات** لا مستند يومي ──
+// لا حقل pages ولا dailyGoalPages على المستند؛ الموجود: ayahCount, pagesTouched, minutes, mode
+quranAyahs(range)       = Σ_{s ∈ sessions(range)} s.ayahCount
+quranPages(range)       = Σ_{s ∈ sessions(range)} s.pagesTouched   // **عدد صحيح عادي لا Minor**
+quranSessionCount(range)= count(sessions(range))
+// الهدف من `QuranGoal` (09 §6.4) لا من حقل على الجلسة، وبوحدته المعلنة:
+quranGoalBps(range)     = goal == null ? null
+                        : safeRatioBps(goal.unit === 'pages' ? quranPages : quranAyahs,
+                                       goal.amount × inclusiveDayCount(range))
+// م-19: «pagesTouched» مُعلَن أنه **صفحات ملموسة لا صفحات مقروءة كاملة**: جلستان في نفس الصفحة
+// تُحسبان 1+1. ⇒ `quranPages` **مقياس جهد لا مسافة مقطوعة**، ويُكتب ذلك حرفياً في تذييل R17.
+// وحساب «المسافة الفعلية» الصحيح هو `quranAyahs` ⇒ **هو العمود الأساسي، والصفحات ثانوية.**
+
+// م-20: «سجل مكتمل» كان غير معرَّف. التعريف المعتمد والوحيد:
+completeDay(d)          = الصلوات الخمس كلها state != 'unset' في worshipDays/{d}
+streakDays(today)       = أطول تتابع أيام متصلة ينتهي عند today أو today−1 ويتحقق فيه completeDay
+// (السماح بالانتهاء عند today−1 مقصود: لا نكسر السلسلة قبل انتهاء يوم المستخدم.)
 ```
 **ثلاث قواعد غير قابلة للتفاوض في تقرير العبادات:**
 1. **المقام = المسجَّل فقط.** «غير مسجَّل» حالة ثالثة تُعرض بعددها، **ولا تُحسب تقصيراً**.
@@ -508,17 +692,17 @@ streakDays(today)      = أطول تتابع أيام فيها سجل مكتمل
 
 | المعادلة | يُستثنى منها صريحاً |
 |---|---|
-| `E(P)` إجمالي المصروفات | التحويلات، الاقتراض، سداد الديون، الإقراض، التحصيل، **أصل** أقساط التمويل، التخصيص، التسويات، احتساب الزكاة، الافتتاحي، المعلّقة، **وتصحيحات الفترات السابقة (سطر منفصل)** |
+| `E(P)` إجمالي المصروفات | التحويلات (إلا العمولة)، **الاقتراض النقدي (R6/أ) لا الشراء بالأجل (R6/ب)**، سداد الديون (إلا الفوائد)، الإقراض، التحصيل، **أصل** أقساط التمويل، التخصيص، التسويات، احتساب الزكاة، الافتتاحي، المعلّقة، **وتصحيحات الفترات السابقة (سطر منفصل)** |
 | `I(P)` إجمالي الدخل | الاقتراض، التحصيل، التحويلات، **الدخل المتوقع غير المستلم**، المعلّقة، تصحيحات الفترات السابقة |
 | `NetOp(P)` | كل ما سبق (يضم التصحيحات عن قصد — I9) |
-| `ΔCash(P)` | الحسابات غير النقدية (`receivable`)، الحسابات المؤرشفة، `excludeFromNetWorth` |
-| `budgetUtil` / `spent` | أقساط التمويل، تصحيحات الفترات المُقفلة، كل المحيَّدات |
+| `ΔCash(P)` | الحسابات `isCashLike == false` (ومنها `receivable`)، غير القابل للترحيل، `excludeFromNetWorth`. **ولا تُستثنى الحسابات المؤرشفة** — استبعادها يُنتج `UnclassifiedMinor` كاذباً (3.6 و `06` §8.1/ر-8) |
+| `budgetUtil` / `spent` | أقساط التمويل، تصحيحات الفترات المُقفلة، كل المحيَّدات، **والفئات بلا `limitMinor` (م-11)**. و**الشراء بالأجل داخل الاستهلاك لا خارجه** (R6/ب من النواة) |
 | `goalProgress` | أهداف `paused`/`cancelled` من الإجمالي |
 | `savingsRate` | الاقتراض والتحصيل من المقام |
-| `availableCash` | **المستحق لي**، المؤرشف، غير القابل للترحيل، المحجوز (في «المتاح بعد الحجز») |
-| `HouseholdE` | لا يُجمع مع `E` — هو جزء منه |
+| `availableCash` | **المستحق لي**، غير القابل للترحيل، `excludeFromNetWorth`، المحجوز (في «المتاح بعد الحجز»). **والمؤرشف رصيده `≠ 0` يُحتسب** (مال موجود فعلاً — `06` §8.1) |
+| `HouseholdE` | لا يُجمع مع `E` — هو جزء منه. **وتجميعه من `postings` يلزمه `accountType=='expense'`** وإلا كان صفراً (`06` §5.4/ر-2) |
 | إجماليات الديون | `settled`، `cancelled`، والمشطوب من «المستحق لي» |
-| تقارير المهام | مهمة بلا `completedAt` **ليست مكتملة** (القسم 14) |
+| تقارير المهام | مهمة `trashed == true` **خارج كل عدّ**؛ ومفتاح تقرير الإنجازات **`completedOn` (`DateKey`) لا `completedAt`** — 3.12 و `09` §4.1 |
 | تقرير العبادات | الأيام غير المسجَّلة من **المقام** (تُعرض بعددها) |
 
 ---
@@ -782,7 +966,7 @@ export function runReportReconciliation(
 | R08 | `debtsReceivable` | الديون المطلوب تحصيلها | `debts where direction=='receivable'` + `followUps` + القيود | إجمالي المستحق، المحصَّل، المشطوب، المتأخر، المتوقع تحصيله (7/30 يوماً) | ≤50 + 25/دين | XLSX, CSV, PDF |
 | R09 | `obligationsUpcoming` | الالتزامات القادمة | `obligations where status in [upcoming,due,partiallyPaid] && dueDate ≤ today+N order by dueDate` | إجمالي المستحق في الأفق، حسب الأولوية، حسب الجهة، حسب الطبيعة (مصروف/تمويل) | ≤100 | XLSX, CSV, PDF |
 | R10 | `obligationsOverdue` | الالتزامات المتأخرة | `obligations where status=='overdue' order by dueDate asc` | إجمالي المتأخر، أقدم تأخير، متوسط أيام التأخير، حسب الجهة | ≤100 | XLSX, CSV, PDF |
-| R11 | `household` | مصاريف المنزل | `periods[*].householdExpenseMinor` + `postings{tag:'household'}` + `budgetPeriods` لفئات المنزل + قيود موسومة | بالوسم، بفئات المنزل، نسبة من المصروف الكلي، الميزانية مقابل الفعلي | 12 + 2 + 1 + التفصيل | XLSX, CSV, PDF |
+| R11 | `household` | مصاريف المنزل | `periods[*].householdExpenseMinor` + `postings{tag:'household', accountType:'expense'}` + `budgetPeriods` لفئات المنزل + قيود موسومة | بالوسم، بفئات المنزل، نسبة من المصروف الكلي، الميزانية مقابل الفعلي | 12 + 2 + 1 + التفصيل | XLSX, CSV, PDF |
 | R12 | `budgetVariance` | الميزانية والانحرافات | `budgetPeriods/{P}` + `periods/{P}` | استهلاك عام ولكل فئة، الانحراف، المتبقي، الفئات المتجاوزة، الاتجاه ×12 | 1 + 1 (+12 للاتجاه) | XLSX, CSV, PDF |
 | R13 | `savingsGoals` | الادخار والأهداف | `financialGoals` + لقطة `accounts` + `postings{goalId}` + `periods` | إجمالي المخصَّص، التقدم لكل هدف، المطلوب شهرياً، معدَّل الادخار ×12 | ≤10 + 0 + 2/هدف | XLSX, CSV, PDF |
 | R14 | `accountStatement` | حركة الحسابات (كشف الحساب) | `journalEntries where accountIds array-contains A && bookedAt ∈ [range] order by bookedAt` + `accountPeriods` للاتجاه | مدين، دائن، الصافي، الرصيد الجاري (الصفحة الأولى فقط)، الحركة الشهرية | 25/صفحة + ≤12 | XLSX, CSV, PDF |
@@ -983,7 +1167,10 @@ yearExpenseByCategory[c] = Σ_{P ∈ 12} (periods[P].expenseByCategory[c] ?? 0)
 
 ```
   1) periods/{P} ×N → householdExpenseMinor, totalExpenseMinor, expenseByCategory → N
-  2) sumPostings({ tag:'household', periodKey:P })                                → 2/شهر
+  2) sumPostings({ tag:'household', accountType:'expense', periodKey:P })        → ⌈n/1000⌉/شهر
+     // **`accountType` شرط صحة لا تحسين:** وسوم القيد تُنسخ على **كل** سطوره، فالتجميع
+     // بالوسم وحده يُرجع **صفراً دائماً** (رجل المصروف +X ورجل النقد −X)
+     // — `06-module-map.md` §5.4/ر-2 والثابت M-I19 والاختبار T-HH-9؛ والفهرس `PG4`.
   3) budgetPeriods/{P} → سقوف فئات expense.home.*                                  → 1/شهر
   4) (صفوف) journalEntries where tags array-contains 'household' && periodKey == P
        order by bookedAtTs desc                                                    → 25/صفحة
@@ -1081,44 +1268,91 @@ yearExpenseByCategory[c] = Σ_{P ∈ 12} (periods[P].expenseByCategory[c] ?? 0)
 #### R16 — المهام والإنجازات
 
 ```
-  1) tasks where completedAt >= from && completedAt <= to order by completedAt desc  → ≤200
-  2) tasks where status in ['todo','doing'] && dueDate <= to order by dueDate asc     → ≤200
-الفهارس المطلوبة (جديدة): tasks: completedAt ASC ؛ tasks: status (==) + dueDate ASC
+م-21 — الاستعلامان القديمان باطلان: 'doing' ليست قيمة في TaskStatus، و completedAt طابع زمني
+       (حدوده تختلف عن اليوم المحلي)، ولا مرشّح trashed ⇒ مهام السلة كانت تُحسب إنجازاً.
+الاستعلامان المعتمدان (وفهرساهما **موجودان فعلاً** في 09 §12):
+  1) tasks where trashed == false && status == 'done'
+          && completedOn >= from && completedOn <= to
+       order by completedOn desc                                                     → ≤200
+     (فهرس 09: tasks: trashed (==) + status (==) + completedOn DESC — **موجود**)
+  2) tasks where trashed == false && status in ['todo','inProgress']
+          && dueDate <= to
+       order by dueDate asc                                                          → ≤200
+     (فهرس 09: tasks: trashed (==) + status (in) + dueDate ASC — **موجود**)
+  3) (المهام بلا موعد) tasks where trashed == false && status in ['todo','inProgress']
+          && dueDate == null  — تُعرض بعددها فقط                                      → ≤50
+**لا فهارس جديدة مطلوبة من هذه الوثيقة لـ R16.** (التصريحان القديمان
+ `tasks: completedAt ASC` و`tasks: status (==) + dueDate ASC` محذوفان: الأول فهرس أحادي
+ تلقائي على حقل لم يبقَ مستخدماً، والثاني ينقصه `trashed` فلا يخدم الاستعلام المعتمد.)
 ```
-**عقد القراءة المطلوب من وحدة المهام** (إن اختلف ⇒ تعارض يُحَل قبل التنفيذ):
-`status: 'todo'|'doing'|'done'|'cancelled'` · `dueDate: DateKey | null` ·
-`completedAt: Timestamp | null` · `priority: 1|2|3` · `listId: string | null` ·
-`recurrenceId?: string`.
+**عقد القراءة** — **مُثبَّت الآن من `09-personal-worship.md` §4.1، لا مقترح:**
+`status: 'todo'|'inProgress'|'done'|'cancelled'` · `dueDate: DateKey | null` ·
+`dueTime: string | null` · `completedAt: Timestamp | null` · `completedOn: DateKey | null` ·
+`priority: 1|2|3` · `listId: string | null` · `recurrenceId: string | null` ·
+`occurrenceKey: DateKey | null` · `trashed: boolean` · `subtasks: Subtask[]`.
+**ثابت P4 من 09:** `completedAt != null ⟺ status === 'done'` — وعليه تُبنى قاعدة «لا إكمال ضمني».
 **الأعمدة:** المهمة | القائمة | الأولوية | تاريخ الاستحقاق | تاريخ الإكمال | التأخير (أيام) |
 الحالة | ملاحظات التنفيذ.
 **الإجماليات:** المكتملة، المفتوحة، المتأخرة، % الإنجاز، % الالتزام بالموعد،
 متوسط التأخير (تقديري)، أكثر قائمة إنجازاً.
 **قاعدة إلزامية (القسم 14):** مهمة بلا `completedAt` **ليست مكتملة** ولا تدخل البسط، مهما كانت
 قيمة `status`. أي تناقض بين الاثنين يُعرض كصف «حالة غير متسقة» لا يُصحَّح صامتاً.
+**م-22:** ومهمة `status === 'done'` بـ `completedOn === null` (مهمة أُكملت قبل إضافة الحقل، أو
+كتابة من نسخة قديمة) **لا تدخل أي نطاق** ⇒ تُجمَع في سطر صريح «مكتملة بلا تاريخ إكمال: N»
+داخل التقرير، لا تُحذف ولا تُنسب إلى النطاق المعروض اعتباطاً.
+**م-23 — المهام المتكررة:** كل دورة مستند مستقل (`recurrenceId` + `occurrenceKey`، 09 §4.5)
+⇒ «مهمة أسبوعية أُنجزت 4 مرات» تظهر **4 صفوف** لا صفاً واحداً. مقصود ومُعلَن في تذييل R16،
+ومع عمود «الدورة» (`occurrenceKey`) حتى لا تُقرأ كأربع مهام مختلفة.
 **الرسوم:** أعمدة «المكتملة لكل أسبوع»، حلقة بالأولوية، خط «المتأخرة عبر الزمن».
 
 #### R17 — متابعة العبادات
 
 ```
-  1) worshipRecords where dateKey >= from && dateKey <= to order by dateKey           → ≤أيام
-  2) quranProgress where dateKey >= from && dateKey <= to order by dateKey            → ≤أيام
-الفهارس (جديدة): worshipRecords: dateKey ASC ؛ quranProgress: dateKey ASC
+م-24 — الاستعلامان القديمان باطلان: لا مجموعة `worshipRecords` ولا `quranProgress` في النظام.
+المعتمد من 09 §5.1 و§6.1:
+  1) worshipDays — مُعرّف المستند **هو** dateKey ⇒ الاستعلام بالمُعرّف لا بحقل:
+       where documentId() >= from && documentId() <= to                               → ≤أيام
+     (وللشهر الكامل: where periodKey == P order by dateKey — فهرس 09 **موجود**)
+     غياب المستند = «لم تُسجَّل» ⇒ **لا تهيئة مسبقة ولا مستندات صفرية** (09 §5.3)
+  2) quranSessions where dateKey >= from && dateKey <= to order by dateKey             → 0–4/يوم
+     (وللشهر: where periodKey == P order by dateKey — فهرس 09 **موجود**)
+     ⚠ **الحبّة «جلسة» لا «يوم»** ⇒ عدد القراءات **ليس** عدد الأيام بل عدد الجلسات
+       (0–4 لليوم، 30–90 للشهر حسب 09 §6.2) ⇒ جدول 10.2 مُصحَّح.
+  3) settings/quranGoal (أو مستند الهدف في 09 §6.4)                                     → 1
+**لا فهارس جديدة مطلوبة من هذه الوثيقة لـ R17.**
 ```
-**عقد القراءة المطلوب من وحدة العبادات:**
-`worshipRecords/{dateKey}`: `prayers: Record<'fajr'|'dhuhr'|'asr'|'maghrib'|'isha',
-{ state: 'performed'|'missed'|'unrecorded'; note?: string }>` ·
-`adhkar?: Record<string, boolean>` · `fasting?: boolean` · `charity?: boolean`.
-`quranProgress/{dateKey}`: `pages: number` · `fromSurah?: number` · `toSurah?: number` ·
-`dailyGoalPages?: number`.
-**الأعمدة:** التاريخ (ميلادي + هجري) | الفجر | الظهر | العصر | المغرب | العشاء |
-صفحات القرآن | أذكار | صيام | صدقة | ملاحظات.
+**عقد القراءة — مُثبَّت من `09-personal-worship.md`:**
+`worshipDays/{dateKey}`: `prayers: Record<'fajr'|'dhuhr'|'asr'|'maghrib'|'isha',
+{ state: 'unset'|'onTime'|'qada'; jamaah: boolean; recordedAt: Timestamp|null; note?: string }>` ·
+`fasting: { state: 'unset'|'fasted'|'notFasted'; kind?: FastingKind }` ·
+`habits: Record<string, { value: number; updatedAt: Timestamp }>` · `hijriLabel: string` ·
+`periodKey: PeriodKey` · `note?: string`.
+`quranSessions/{sessionId}`: `dateKey` · `periodKey` · `mode: 'reading'|'memorizing'|'reviewing'|'listening'` ·
+`from`/`to: QuranPosition` · `ayahCount: number` · `pagesTouched: number` · `minutes: number|null`.
+**ثلاثة فروق لها أثر مباشر على التقرير:**
+1. **`'qada'` ليست `'missed'`.** «قضاء» أداء، لا تفويت. ⇒ `onTimePrayers` و`qadaPrayers`
+   عمودان مستقلان، و**لا عمود «فائتة» إطلاقاً** لأن النموذج لا يسجّل التفويت أصلاً.
+2. **`jamaah` بُعد مستقل** ⇒ عمود/إجمالي إضافي («المسجَّل جماعةً»)، وهو مطلب القسم 15 بند 1.
+3. **لا حقل `charity: boolean`.** الصدقة **عملية مالية في الدفتر** (`expense.charity`) وثابت P20
+   في 09 يمنع أي حقل مبلغ في `worshipDays` ⇒ الصدقة تُقرأ في R06 لا في R17؛ وما يُعرض في R17
+   هو عدّاد عادة (`habits`) إن أنشأه المستخدم، **بلا أي مبلغ**.
+4. **الصيام:** `fasting.state` ثلاثي + `kind` ⇒ العمود «صيام» ثلاثي القيم ومعه نوعه، لا نعم/لا.
+**الأعمدة (مُصحَّحة، م-24):** التاريخ (ميلادي + `hijriLabel` المخزَّن) | الفجر | الظهر | العصر |
+المغرب | العشاء (كل خلية: الحالة + شارة «جماعة») | آيات القرآن | صفحات ملموسة | دقائق |
+الصيام (الحالة + النوع) | عدّادات العادات | ملاحظات.
 **الإجماليات:** الأيام في النطاق، **الأيام المسجَّلة**، **الأيام غير المسجَّلة**،
-الصلوات المسجَّلة، نسبة المؤدّى **من المسجَّل**، صفحات القرآن، نسبة الورد من الهدف،
-أطول سلسلة أيام مسجَّلة.
+الصلوات المسجَّلة، منها **في وقتها** ومنها **قضاءً** ومنها **جماعةً** (أعمدة لا نسب حكمية)،
+نسبة «في وقتها» **من المسجَّل**، آيات القرآن (الأساسي)، الصفحات الملموسة (ثانوي)،
+نسبة الورد من الهدف، أطول سلسلة أيام مكتملة.
 **الثلاثة الممنوعة:** لا مقام يضم غير المسجَّل، لا لفظ تقييمي («تقصير/ضعيف»)،
 لا مقارنة بفترة سابقة إلا بتفعيل المستخدم.
 **التقويم:** الميلادي افتراضاً والهجري بجانبه (القسم 3 من المتطلبات)،
 والهجري **عرض فقط** ولا يُستخدم مفتاحاً ولا في أي استعلام.
+**م-25 — مصدر التاريخ الهجري كان غير محدَّد:** التقرير **لا يحسب** الهجري، بل يقرأ
+`worshipDays.hijriLabel` **المخزَّن لقطةً** (09 §2.2) ⇒ التقرير والشاشة والملف المُصدَّر تتطابق
+دائماً ولو تغيّر محرّك التحويل أو نسخة `Intl`. ولليوم بلا مستند (غير مسجَّل) يُحسب العنوان عرضاً
+بـ `Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura')` **بتقويم أم القرى حصراً**، ومعه تذييل:
+«التاريخ الهجري للعرض فقط وقد يختلف يوماً عن الرؤية المحلية».
 **الرسوم:** خريطة حرارية بالأيام (مسجَّل/غير مسجَّل)، أعمدة «صفحات القرآن أسبوعياً»،
 خط السلسلة. **بلا أي ترميز لوني يحمل حكماً** (لا أحمر للفائت؛ رمادي = غير مسجَّل).
 
@@ -1570,30 +1804,63 @@ export function exportCsv(table: ExportTable, o: CsvOptions): Blob {
 ### 10.1 الفهارس الجديدة التي تطلبها طبقة التقارير
 
 > **إضافات على جدول النواة §15.5، لا تعديلاً عليه.** كلها إضافية ولا تكسر فهرساً قائماً.
+>
+> **تصحيح اتساق (تدقيق مالي) — مرجع واحد للفهارس:** الملف المنشور هو
+> `firestore.indexes.json`، ومصدره الوحيد هو **`03-data-model.md` §10.1 و§10.2** (96 فهرساً
+> و55 استثناءً). فهارس هذا القسم **مُدمَجة هناك بالفعل** بالرموز `AP2`, `JE16`, `JE17`,
+> `PO16`, `PO17`, `PG1…PG12`. **ولا يُنشر فهرس من هذه الوثيقة مباشرة.**
 
 ```
-# تجميعات خادمية على نطاق تاريخ (لا فترة واحدة)
-postings:        accountType (==) + bookedAt ASC
-postings:        categoryId (==)  + bookedAt ASC
-postings:        isCashLike (==)  + periodKey (==)         ← ثابت R-I5
-postings:        isCashLike (==)  + bookedAt ASC
-postings:        contactId (==)   + periodKey (==)
-postings:        goalId (==)      + periodKey (==)
+# ── تجميعات خادمية (الحقل المُجمَّع آخرُ حقل في الفهرس — شرط sum، انظر 03 §9.1(هـ)) ──
+postings:  periodKey (==) + isCashLike (==) + signedAmountMinor      ← R-I5            = PG5
+postings:  isCashLike (==) + bookedAt ASC + signedAmountMinor        ← ΔCash نطاق جزئي  = PG9
+postings:  contactId (==) + periodKey (==) + signedAmountMinor       ← R07/R08         = PG7
+postings:  goalId (==) + periodKey (==) + signedAmountMinor          ← R13             = PG8
+postings:  periodKey (==) + accountType (==) + signedAmountMinor     ← R-I1/R-I2/Q61   = PG3
+postings:  categoryId (==) + periodKey (==) + signedAmountMinor      ← Q62             = PG6
+postings:  periodKey (==) + accountType (==) + tags (◇) + signedAmountMinor ← M-I6/R11 = PG4
 
-# حركة الفترة لكل الحسابات (تقرير التدفق النقدي)
-accountPeriods:  periodKey (==)   + accountId ASC
+# ── صفوف ونطاقات ──
+postings:  accountType (==) + bookedAt ASC + signedAmountMinor       ← R06 نطاق جزئي  = PO5 (مُلحَق)
+postings:  categoryId (==)  + bookedAt ASC + signedAmountMinor       ← R06 بالفئة     = PO7 (مُلحَق)
+postings:  contactId (==)   + bookedAt ASC + signedAmountMinor       ← م-26           = PO13 (مُلحَق)
+postings:  goalId (==)      + bookedAtTs ASC + signedAmountMinor     ← R13 خطوة 3     = PO12 (مُلحَق)
+postings:  tags (◇) + accountType (==) + bookedAt ASC + signedAmountMinor ← R11 نطاق جزئي = PO17
+postings:  accountId (==) + accountType (==) + periodKey (==)        ← R05 لكل مصدر   = PO16
+accountPeriods:  periodKey (==) + accountId ASC                      ← R15 (ΔCash)    = AP2
+journalEntries:  tags (◇) + periodKey (==) + bookedAtTs DESC         ← R11 خطوة 4     = JE16
+journalEntries:  periodKey (==) + accountTypes (◇) + bookedAtTs DESC ← R05/R06 بالنوع = JE17
 
-# الإسقاط اليومي (عند اعتماد ADR-023)
-dailyRollups:    periodKey (==)   + dateKey ASC
-#  (نطاق dateKey وحده يكفيه الفهرس الأحادي التلقائي)
+# ── م-27 مُصحَّحة: ما كان مطلوباً هنا موجود أصلاً في 03 §10، وسطران كانا خطأً ──
+# `journalEntries: periodKey (==) + bookedAtTs DESC`  ⇐ **موجود**: الفهرس `JE6`
+#   (periodKey ASC + bookedAtTs ASC) يخدمه، لأن الفهرس المركَّب يخدم الاتجاهين لآخر حقل (م-28).
+# `journalEntries: accountIds (◇) + bookedAt ASC + __name__ ASC` ⇐ **زائد**: Firestore يُلحق
+#   `__name__` تلقائياً باتجاه آخر حقل ⇒ الفهرس `JE2` يعطي الترقيم الحتمي نفسه.
+# `journalEntries: bookedAt (==) + bookedAtTs DESC` ⇐ **فهرس بلا معنى يُحذف**: العقد §4.3 يعرّف
+#   `bookedAtTs` بأنه **منتصف نهار UTC لذلك اليوم** ⇒ كل قيود اليوم الواحد لها **نفس القيمة**
+#   بالضبط، فالترتيب بها داخل `bookedAt ==` لا يرتّب شيئاً. R01 (التقرير اليومي) يكفيه
+#   `where bookedAt == D` بالفهرس الأحادي التلقائي، والترتيب الحتمي بـ `__name__`.
 
-# وحدتا المهام والعبادات
-tasks:           completedAt ASC
-tasks:           status (==)      + dueDate ASC
-tasks:           listId (==)      + dueDate ASC
-worshipRecords:  dateKey ASC
-quranProgress:   dateKey ASC
+# الإسقاط اليومي: **لا يُنشر حتى إقرار ADR-023** (القسم 14: «مقترح — يحتاج موافقة المالك»)
+# dailyRollups:  periodKey (==) + dateKey ASC        ← يُضاف إلى 03 §10.2 عند الإقرار فقط
+
+# ── م-21/م-24: وحدتا المهام والعبادات — **لا فهرس جديد من هذه الوثيقة** ──
+# كل ما تحتاجه R16 و R17 منصوص في 09-personal-worship.md §12 ومملوك لها:
+#   tasks:          trashed (==) + status (==) + completedOn DESC
+#   tasks:          trashed (==) + status (in) + dueDate ASC
+#   tasks:          trashed (==) + listId (==) + status (in) + orderKey ASC
+#   worshipDays:    periodKey (==) + dateKey ASC
+#   quranSessions:  periodKey (==) + dateKey ASC
+#   quranSessions:  dateKey (==)   + createdAt DESC
+# (المحذوف من النسخة السابقة: tasks: completedAt ASC ، tasks: status (==) + dueDate ASC ،
+#  worshipRecords: dateKey ASC ، quranProgress: dateKey ASC — ثلاثة منها على مجموعات لا وجود لها،
+#  والرابع فهرس أحادي تلقائي لا يُصرَّح به.)
 ```
+
+**م-28 — قاعدة فهرسة صريحة لمنع التكهّن:** Firestore يُنشئ **تلقائياً** فهرساً أحادياً تصاعدياً
+وتنازلياً لكل حقل غير مستثنى ⇒ **كل سطر في `firestore.indexes.json` لا بد أن يكون مركَّباً
+(حقلان أو أكثر) أو على مصفوفة**. أي سطر أحادي في هذه الوثيقة خطأ تحرير يُحذف.
+وفهرس مركَّب واحد **يخدم الاتجاهين** (تصاعدي وتنازلي) لآخر حقل في الترتيب — فلا نكرره بالاتجاهين.
 
 **استثناءات الفهرسة الأحادية المقترحة (لتقليل تكلفة الكتابة):**
 على `dailyRollups` تُلغى فهرسة كل الحقول الرقمية (`expenseMinor`, `incomeMinor`, … `netFlowMinor`,
@@ -1748,7 +2015,7 @@ export const READ_HARD_CAP          = 20_000;  // فوقها: رفض + اقتر�
 | **5** | **محور «الشهر المالي»** (ADR-008): هل يُفعَّل في الإصدار الأول لأن المالك يتقاضى راتبه في يوم محدَّد؟ | إسقاط `fiscalPeriods` + كل التقارير الزمنية | الإصدار الأول بالشهر الميلادي. التفعيل لاحقاً = إسقاط إضافي + إعادة بناء، بلا أي كتابة على قيد |
 | **6** | **عتبة تأكيد تكلفة القراءة** `READ_CONFIRM_THRESHOLD = 1,000` والحدّ الصلب `20,000`: مناسبان؟ | تجربة التصدير الكبير | قابلان للضبط في الإعدادات دون أثر على البيانات |
 | **7** | **بداية الأسبوع**: اعتمدنا **السبت** افتراضاً (العُرف الليبي). تأكيد أو تغيير؟ | R02 + مخططات الأسابيع | إعداد عرض في `settings.display.weekStartsOn`، بلا أثر على التخزين |
-| **8** | **عقد وحدتي المهام والعبادات** (R16/R17): الحقول في 6.2 هي ما تعتمده التقارير. إن صممت وحدتاهما حقولاً مختلفة ⇒ تعارض | R16، R17 | تثبيت العقد في وثيقتي الوحدتين، أو تعديل هذه الوثيقة بعد صدورهما — **ولا تنفيذ لتقريري R16/R17 قبل الحسم** |
+| **8** | ~~**عقد وحدتي المهام والعبادات** (R16/R17)~~ **حُسم — صدرت `09-personal-worship.md`** وثبّتت `tasks` (بـ`trashed` و`orderKey` و`completedOn`) و`worshipDays/{dateKey}` و`quranSessions`. الصيغ في 3.12 مُصحَّحة عليها (م-16)، وأُصلحت في تدقيق الاتساق المالي بقيّةُ المواضع التي بقيت على الأسماء الباطلة: `DataSourceRef.collection` و`ReportIO.listWorship` في القسم 2، وصفّا «تقارير المهام» و«تقرير العبادات» في 3.13. | — | **لا سؤال مفتوح.** و`09` هو المرجع لمجموعاته، و`07` لمجموعة `notifications` |
 | **9** | **تصدير هواتف المدينين (R08)** مُستبعَد افتراضياً: مناسب أم يُضمَّن؟ | خصوصية الأطراف الأخرى | الاستبعاد افتراضاً + خيار صريح في حوار التصدير |
 | **10** | **حدّ PDF = 2,000 صف**: مناسب أم يُرفع؟ | R06/R14 خاصة | قابل للضبط؛ ما فوقه يُقترح XLSX |
 
@@ -1778,3 +2045,24 @@ export const READ_HARD_CAP          = 20_000;  // فوقها: رفض + اقتر�
 
 > هذه الوثيقة تخضع للنواة. أي تعارض بينها وبين `01-financial-core.md` ⇒ **النواة تفوز**،
 > وهذه الوثيقة تُصحَّح.
+
+---
+
+> تعديل اتساق (تدقيق مالي): §3.4/٣ و§3.13 كانتا تستثنيان **الاقتراض** مطلقاً من `spentMinor`
+> و`E(P)`، وهذا يخالف جدول الحقيقة R6 في النواة §9 الذي ينصّ على أن **الشراء بالأجل (حالة ب)**
+> يزيد `totalExpenseMinor` و`budgetPeriods.spentMinor`؛ فصار المستبعَد **الاقتراض النقدي (حالة أ)**
+> وحده. · و§3.6 كانت تُسقط الحسابات المؤرشفة من `ΔCash` بمرشّح `status`، فتُنتج «فرقاً غير
+> مُصنَّف» كاذباً ودائماً؛ ووُحِّدت مجموعة الحسابات النقدية في §3.6 و§3.9 و§3.13 على `spendableSet`
+> من `06` §8.1 (المرشّح الوحيد `excludeFromNetWorth`). · و§3.9 كانت تُعلن دوال الثروة «حرفية من
+> النواة §R9» وهي **ليست كذلك** بعد تصحيحَي ر-8 ور-9 في `06` §8.1، فصارت تُحيل إليها وتُظهر
+> انحراف `totalPayablesMinor` (ضمّ `zakatDue`) المنتظِر إقرار المالك. · وأُضيف **شطب المستحق**
+> (`debtWriteOff`: مصروف بلا نقد) إلى قائمة ما يُنتج `UnclassifiedMinor` في §3.6 بعد أن كان
+> غائباً مع أنه حالة حتمية في R7. · وأُضيف `accountType=='expense'` إلى تجميع المنزل في R11
+> (السجل §6 والخطوة 2) لأن التصفية بالوسم وحده على `postings` تُرجع **صفراً دائماً**
+> (`06` §5.4/ر-2 · M-I19 · T-HH-9). · ووُحِّدت أسماء مجموعتَي العبادات على `09`
+> (`worshipDays`/`quranSessions` بدل `worshipRecords`/`quranProgress`) في §2 و§3.13، ومفتاح تقرير
+> الإنجازات على `completedOn` بدل `completedAt`، وأُغلق السؤال المفتوح رقم 8. · و§10.1 صارت
+> **مُحيلة إلى `03` §10 كمرجع وحيد للفهارس**، وحُذف منها فهرسان زائدان (`periodKey+bookedAtTs`
+> يخدمه `JE6`، و`accountIds+bookedAt+__name__` يخدمه `JE2`) وفهرس **بلا معنى**
+> (`bookedAt (==) + bookedAtTs DESC`: `bookedAtTs` دالّة في `bookedAt` وحده ⇒ قيمة واحدة لكل
+> قيود اليوم)، وبقي `dailyRollups` غير منشور حتى إقرار ADR-023.

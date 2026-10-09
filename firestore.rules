@@ -27,23 +27,6 @@ service cloud.firestore {
     return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
   }
 
-  // بوابة إعادة البناء — **بنمط آمن**: غياب المستند لا يُوقف النظام
-  function rebuildNotRunning(uid) {
-    return !exists(/databases/$(database)/documents/users/$(uid)/meta/integrity)
-        || get(/databases/$(database)/documents/users/$(uid)/meta/integrity)
-             .data.rebuildStatus != 'running';
-  }
-  function rebuildRunning(uid) {
-    return exists(/databases/$(database)/documents/users/$(uid)/meta/integrity)
-        && get(/databases/$(database)/documents/users/$(uid)/meta/integrity)
-             .data.rebuildStatus == 'running';
-  }
-  function periodNotLocked(uid, pk) {
-    return !exists(/databases/$(database)/documents/users/$(uid)/periodLocks/$(pk));
-  }
-  function accountExists(uid, id) {
-    return exists(/databases/$(database)/documents/users/$(uid)/accounts/$(id));
-  }
 
   function entryShapeOk(d) {
     return d.keys().hasAll(['opId','kind','status','bookedAt','periodKey','lines',
@@ -74,6 +57,31 @@ service cloud.firestore {
   }
 
   match /databases/{database}/documents {
+
+    // ══════════════════════════════════════════════════════════════════
+    // دوال تعتمد على مسار قاعدة البيانات.
+    // **يجب أن تبقى داخل هذه الكتلة**: المتغيّر `database` يُربَط بـ
+    // `match /databases/{database}/documents` فقط. تعريفها خارجها يجعل
+    // `$(database)` غير مُعرَّف ⇒ «Null value error» يُرجم كل إنشاء قيد.
+    // (عيب حقيقي رُصد في اختبار المحاكي، لا في المراجعة البصرية.)
+    // ══════════════════════════════════════════════════════════════════
+    // بوابة إعادة البناء — **بنمط آمن**: غياب المستند لا يُوقف النظام
+    function rebuildNotRunning(uid) {
+      return !exists(/databases/$(database)/documents/users/$(uid)/meta/integrity)
+          || get(/databases/$(database)/documents/users/$(uid)/meta/integrity)
+               .data.rebuildStatus != 'running';
+    }
+    function rebuildRunning(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid)/meta/integrity)
+          && get(/databases/$(database)/documents/users/$(uid)/meta/integrity)
+               .data.rebuildStatus == 'running';
+    }
+    function periodNotLocked(uid, pk) {
+      return !exists(/databases/$(database)/documents/users/$(uid)/periodLocks/$(pk));
+    }
+    function accountExists(uid, id) {
+      return exists(/databases/$(database)/documents/users/$(uid)/accounts/$(id));
+    }
     match /users/{uid} {
 
       // ── الافتراضي: لا شيء مسموح لمن ليس المالك المعتمد ──
