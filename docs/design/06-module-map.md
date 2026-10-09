@@ -1734,7 +1734,22 @@ export interface Note {
 يصنّف `refs.*` ضمن «عكس + بديل») ⇒ ربط ملاحظة بقيد قديم **مستحيل** لو كان الاتجاه معاكساً.
 (والعقد يحتفظ بـ `refs.noteId` للربط **لحظة الإنشاء** فقط.)
 
-### 13.2 العبادات `worshipRecords` و`quranProgress` 〔جديد〕
+### 13.2 العبادات — ~~`worshipRecords` و`quranProgress`~~ ⇒ `worshipDays` و`quranSessions`
+
+> ### ⚠ هذا القسم **منسوخ (superseded)** — تصحيح اتساق (تدقيق مالي)
+>
+> صدرت بعد هذه الوثيقة `docs/design/09-personal-worship.md` وثبّتت المجموعتين بـ ADR-PW-15
+> و ADR-PW-18: **`users/{uid}/worshipDays/{YYYY-MM-DD}`** (مستند واحد لكل يوم، يحمل الصلوات
+> والصيام والأذكار)، و**`users/{uid}/quranSessions/{sessionId}`** (سجل **جلسات**، والتقدّم
+> **مشتقّ بالاستعلام** لا حقل تراكمي مخزَّن). وحالات الصلاة فيها
+> `'unset' | 'onTime' | 'qada'` **لا `'performed'/'missed'/'notRecorded'`**.
+>
+> **المرجع المُلزِم لهاتين المجموعتين هو `09` §5 و§6 و§12**، وما في هذا القسم (وفي §19.1
+> و§17.4 و§13.3 و§16 من هذه الوثيقة) يبقى **للتأريخ فقط**: الأسماء `worshipRecords` و
+> `quranProgress` **لا تُنفَّذ**، ومعها بطلت صيغ `08-reports.md` §3.12 القديمة (م-16) وفهارس
+> `03-data-model.md` §9.8/§10 المبنية عليها (سؤال المالك 17 هناك).
+> و**لا أثر مالي** لأي من ذلك: الصدقة بمال عمليةٌ مالية عادية `recordExpense` (09 §…)،
+> ولا كتابة مالية من هذه الوحدة إطلاقاً.
 
 ```ts
 // users/{uid}/worshipRecords/{YYYY-MM-DD}      ← **مستند واحد لكل يوم**
@@ -2347,37 +2362,55 @@ export function splitObligations(
 مركَّب بلا فهرس يفشل بـ `failed-precondition` ⇒ **الشاشة فارغة والرسالة غير مفهومة للمستخدم**.
 وهذه الفهارس **تُضاف إلى `firestore.indexes.json` وتُنشر** قبل أي شاشة تستعلمها.
 
+> **تصحيح اتساق (تدقيق مالي) — مرجع واحد للفهارس، وأسماء حقول من عقودها:** الملف المنشور
+> `firestore.indexes.json` مصدره **`03-data-model.md` §10.1/§10.2 حصراً**. وكانت ستة أسطر أدناه
+> على **حقول لا وجود لها** في العقود التي صدرت بعد هذه الوثيقة، فتُنشر فهارس ميتة وتبقى الشاشات
+> فارغة: `tasks.completedAt` (المعتمد `completedOn` — `09` §4.1)، `tasks.linkedObligationId` و
+> `notes.linkedObligationId/linkedGoalId/linkedTaskId` (المعتمد `linkedIds` مصفوفةً — `09` §3/§4)،
+> `tasks.status`/`notes.status` بلا `trashed` (`09` يجعل `trashed` **إلزامياً في كل مرشّح**)،
+> `reminders.targetKind` (المعتمد `target.kind`)، `notifications.kind` (المعتمد `type` —
+> `07` §…`NotificationType`)، `zakatRecords.hawlDateGregorian` (المعتمد `hawlEndAt` —
+> `09` §12.1)، و`worshipRecords`/`quranProgress` (المعتمد `worshipDays`/`quranSessions`).
+> السطور أدناه مُصحَّحة، **والمرجع المُلزِم لكل مجموعة هو وثيقتها**.
+
 ```
-# ── تصحيحات على فهارس العقد §15.5 (ثابتان ناقصان يستخدمهما هذا التصميم) ──
-postings:        tags (array-contains) + accountType (==) + periodKey (==)
-                 ← **إلزامي لـ M-I6 ولتقرير المنزل.** بلا هذا الفهرس §5.4/موضع 2 لا يعمل
+# ── تصحيحات على فهارس العقد §15.5 (ثابت ناقص يستخدمه هذا التصميم) ──
+postings:        periodKey (==) + accountType (==) + tags (array-contains) + signedAmountMinor
+                 ← **إلزامي لـ M-I6 ولتقرير المنزل.** بلا هذا الفهرس §5.4/موضع 2 لا يعمل.
+                   (مُدمَج في 03 §10 بالرمز `PG4`، ونظيره للصفوف `PO8`.)
 obligations:     status (in) + dueDate ASC
                  ← موجود في العقد كـ (==)؛ ويعمل مع `in` بنفس الفهرس. مذكور للتأكيد (§17.5)
+debts:           direction (==) + status (in) + expectedSettleAt ASC
+                 ← «التحصيل المتوقع خلال أسبوع/شهر» (المتطلبات §10 — ر-21).
+                   **تصحيح:** يخدمه الفهرس القائم `DE2` بلا إضافة؛ و`in` مساواة لا متباينة.
 
-# ── المجموعات الجديدة ──
-tasks:           status (==) + dueDate ASC                      ← «مهام اليوم» و«المتأخرة»
-tasks:           status (==) + completedAt ASC                  ← تقرير «المهام والإنجازات» (§14)
-tasks:           listId (==) + status (==) + dueDate ASC        ← قوائم المهام
-tasks:           linkedObligationId (==)                        ← إغلاق المهمة عند الدفع
-notes:           status (==) + pinned DESC + updatedAt DESC     ← شاشة المفكرة الافتراضية
-notes:           notebookId (==) + status (==) + updatedAt DESC ← دفتر واحد
-notes:           searchTokens (array-contains-any) + updatedAt DESC   ← البحث (§13.1/ر-15)
-notes:           linkedObligationId (==)  ·  linkedGoalId (==)  ·  linkedTaskId (==)
-reminders:       status (==) + targetKind (==)                  ← مُشغِّل الاستدراك
-zakatRecords:    status (==) + hawlDateGregorian DESC           ← سجل الزكاة + M-I13
-worshipRecords:  (معرّفه هو التاريخ ⇒ نطاق على __name__ يكفي — **لا فهرس مركَّب**)
-quranProgress:   (كذلك)
+# ── المجموعات الجديدة: المرجع لها `09-personal-worship.md` §12.1 و`07-…` ──
+#   (مكتوبة هنا بأسماء حقولها المعتمدة فقط، ولا تُنشر من هذه الوثيقة)
+tasks:           trashed (==) + status (in) + dueDate ASC       ← «مهام اليوم» و«المتأخرة»
+tasks:           trashed (==) + status (==) + completedOn DESC  ← تقرير «المهام والإنجازات» (§14)
+tasks:           trashed (==) + listId (==) + status (in) + orderKey ASC   ← قوائم المهام
+tasks:           linkedIds (array-contains) + dueDate ASC       ← إغلاق المهمة عند الدفع
+notes:           trashed (==) + archived (==) + pinned (==) + pinnedAt DESC  ← شاشة المفكرة
+notes:           trashed (==) + notebookId (==) + updatedAt DESC            ← دفتر واحد
+notes:           trashed (==) + archived (==) + searchTokens (◇) + updatedAt DESC  ← البحث
+notes:           linkedIds (array-contains) + updatedAt DESC
+reminders:       status (==) + nextFireAt ASC   ·   target.kind (==) + status (==) + nextFireAt ASC
+zakatRecords:    status (in) + hawlEndAt ASC                    ← سجل الزكاة + M-I13
+worshipDays:     periodKey (==) + dateKey ASC                   ← العرض الشهري
+quranSessions:   periodKey (==) + dateKey ASC   ·   dateKey (==) + createdAt DESC
 householdBudgets:(معرّفه pk ⇒ قراءة مباشرة — **لا فهرس**)
 notifications:   read (==) + createdAt DESC                     ← مركز التنبيهات والعدّاد
-notifications:   kind (==) + createdAt DESC                     ← تصفية بالنوع (المتطلبات §17)
-debts:           direction (==) + expectedSettleAt ASC          ← «التحصيل المتوقع خلال أسبوع/شهر»
-                                                                   (المتطلبات §10 — ر-21)
+notifications:   type (==) + createdAt DESC                     ← تصفية بالنوع (المتطلبات §17)
 ```
 
 **استثناءات فهرسة أحادية مطلوبة** (لتقليل تكلفة الكتابة، بنفس منهج العقد §15.5):
 إلغاء فهرسة `notes.bodyMarkdown`, `notes.searchText`, `zakatRecords.accountSnapshot`,
-`zakatRecords.assumptionsAr`, `tasks.notes`, `worshipRecords.prayers`.
+`zakatRecords.assumptionsAr`, `tasks.notes`, `worshipDays.prayers`.
 **ملاحظة:** `notes.searchTokens` **تبقى مفهرسة** (هي أساس البحث)، وسقف 150 رمزاً يحمي تكلفة الكتابة.
+
+> **تحذير مُلزِم (تدقيق مالي):** لا يُلغى فهرس حقل تُجمَّعه `sum()` خادمياً. `sum()` **يحتاج الحقل
+> المُجمَّع داخل الفهرس** ⇒ استثناء `postings.signedAmountMinor` أو `settlementDeltaMinor` أو
+> `isCashLike` يُسقط M-I6 و I5b و I6b و R-I5 معاً. التفصيل في `03-data-model.md` §9.1(هـ).
 
 ### 19.3 مهمة الحالات اليومية — تعريف كامل (كانت مذكورة بلا تعريف — ر-22)
 
@@ -2686,3 +2719,22 @@ export const UNHIDEABLE: readonly DashboardCardId[] = ['availableCash', 'alerts'
     و`ObligationStatus` بلا `converted` (٥)؛ و`OperationKind`/`EntryKind` بلا الثلاثة (٦)؛
     و§12.1 و§12.4 تكتبان `notifications/{autoId}` (٧)؛ و§21.1 بلا طبقة مُستجيبات (٨)؛
     و`RecurrenceRule.kind` محصور في ثلاثة (٩). **لا شيء منها مُختلق.**
+
+---
+
+> تعديل اتساق (تدقيق مالي): §8.1 كانت تعرّف «النقد المتاح» في الكود بـ
+> `isCashLike && isPostable && !excludeFromNetWorth && (active || balance ≠ 0)` ثم تكتبه في كتلة
+> «بالكلمات» في القسم نفسه بـ `{ isCashLike && active && isPostable }` — **تعريفان متناقضان في
+> صفحة واحدة**، والثاني هو ما يُسقطه التصحيح ر-8 نفسه؛ فوُحِّدت الكتلة على الكود، ووُحِّد عليها
+> `08-reports.md` §3.6 و§3.9 و§3.13. · و§19.2 كانت تطلب نشر **ستة فهارس على حقول لا وجود لها**
+> في العقود التي صدرت بعدها (`tasks.completedAt`، `tasks/notes.linkedObligationId`،
+> `reminders.targetKind`، `notifications.kind`، `zakatRecords.hawlDateGregorian`،
+> و`tasks`/`notes` بلا `trashed`)، وفهرس `debts: direction + expectedSettleAt` يغنيه `DE2`
+> القائم؛ فصُحِّحت الأسماء على `09` §12.1 و`07`، وصار **`03-data-model.md` §10 هو المرجع الوحيد
+> الذي يُنشر منه `firestore.indexes.json`**. · وأُضيف تحذير صريح يمنع إلغاء فهرسة أي حقل
+> تُجمَّعه `sum()` خادمياً (كان استثناء `postings.signedAmountMinor` يُسقط M-I6 نفسه). ·
+> و§13.2 وُسمت **منسوخة** بـ `09` (`worshipDays`/`quranSessions`)، وصُحِّح صفّا «المهام
+> والإنجازات» و«متابعة العبادات» في §14 إلى `completedOn` + `trashed==false` وإلى المجموعتين
+> المعتمدتين. · وقاعدة منع الازدواج المنزلي (§5.3) **لم تتغيّر**: هي مطابقة للعقد §9/R1 وI15
+> ولـ `08` §3.10، والفرق الوحيد الذي كان قائماً هو غياب `accountType` من استعلام `03` Q26
+> ومن تجميع `08` R11 — وقد أُصلح في الوثيقتين.

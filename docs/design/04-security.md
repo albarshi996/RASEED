@@ -75,18 +75,39 @@
 ### 3.1 المزوّد: Google فقط (ق-2)
 
 ```ts
-// infra/firebase/auth.ts — السطح الكامل. لا مزوّد آخر في الكود إطلاقاً.
+// src/data/firebase/auth.ts — السطح الكامل. لا مزوّد آخر في الكود إطلاقاً.
+// ⚠ تصحيح مسار (تدقيق معماري): كان مكتوباً `infra/firebase/auth.ts`، ولا وجود لـ `src/infra`
+//   في المشروع. الطبقة التي تلمس Firebase هي `src/data/**` حصراً (02-architecture §4.1 و§5.4).
 import { GoogleAuthProvider, signInWithPopup, signInWithRedirect,
-         reauthenticateWithPopup, signOut, onIdTokenChanged,
+         reauthenticateWithPopup, signOut, onAuthStateChanged, onIdTokenChanged,
          indexedDBLocalPersistence, setPersistence } from 'firebase/auth';
 
-const provider = new GoogleAuthProvider();
-provider.setCustomParameters({ prompt: 'select_account' });
+const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export async function signIn(): Promise<void> { /* popup على الحاسوب، redirect على الهاتف */ }
-export async function reauthenticate(): Promise<void>;   // قبل كل عملية مدمِّرة — 3.4
-export async function signOutHere(): Promise<void>;      // هذا الجهاز فقط
+// ── المنفَّذ فعلاً اليوم في `src/data/firebase/auth.ts` ──
+export function observeSession(cb: (u: SessionUser | null) => void): () => void;
+export function signInWithGoogle(): Promise<SignInResult>;   // نتيجة مُوسَّمة لا استثناء
+export function signOut(): Promise<void>;                    // هذا الجهاز فقط
+export type SignInFailure = 'POPUP_BLOCKED' | 'POPUP_CLOSED' | 'NETWORK'
+                          | 'PROVIDER_DISABLED' | 'UNKNOWN';
+export const SIGN_IN_ERROR_AR: Record<SignInFailure, string>;
+
+// ── ما يبقى مطلوباً ولم يُنفَّذ بعد (يُضاف إلى **نفس** الملف) ──
+export function reauthenticate(): Promise<void>;   // 3.4 — قبل كل عملية مدمِّرة (أ-4)
+export function ensureFreshAuth(maxAgeSec?: number): Promise<void>;   // 3.4
 ```
+
+> **فجوتان قائمتان في الكود المنفَّذ، مُسجَّلتان لا مسكوت عنهما (تدقيق معماري):**
+> 1. **لا تراجع إلى `signInWithRedirect`.** `src/data/firebase/auth.ts` يستورد
+>    `signInWithPopup` وحده. ومع مزوّد **وحيد** (ق-2)، حجب النافذة المنبثقة — وهو السلوك
+>    الافتراضي في PWA مثبَّت على iOS وفي بعض متصفحات الهاتف — يعني **لا وصول للنظام إطلاقاً**.
+>    الكود يُصنِّف الحالة بـ `POPUP_BLOCKED` ويعرض رسالة عربية، وهذا **تشخيص لا حلّ**.
+>    المطلوب: التراجع الموصوف في `02-architecture.md` §11.2.
+> 2. **لا `setPersistence(indexedDBLocalPersistence)` صريحة** ولا `reauthenticate`.
+>    الأولى شرط لـ PWA والعمل دون اتصال (3.5)، والثانية شرط لأ-4 و`freshAuth()` في القواعد:
+>    **القاعدة تفرض الحداثة، وبلا `reauthenticateWithPopup` لا يستطيع المستخدم تحديثها**
+>    ⇒ إقفال فترة وإعادة بناء يُرفضان بـ `permission-denied` بلا مخرج.
 
 **إجراءات Firebase Console الإلزامية (تُنفَّذ يدوياً مرة واحدة وتُسجَّل في `docs/runbook`):**
 
@@ -324,6 +345,19 @@ Cross-Origin-Opener-Policy: same-origin-allow-popups
 **كل مجموعة غير مذكورة في القواعد = مرفوضة بالكامل** (الافتراضي في Firestore هو الرفض).
 وهذا مقصود: إضافة مجموعة جديدة في الكود **تفشل** حتى تُضاف قاعدتها — وهي بوابة مراجعة أمنية مجانية.
 
+> **وقد عملت هذه البوابة ضدّنا فعلاً (تدقيق معماري):** ثماني مجموعات مطلوبة كانت بلا قاعدة
+> (`budgetTemplates`, `scenarios`, `importBatches`, `fiscalPeriods`, `habits`,
+> `notes/{id}/content`, `recurrenceProposals`, `personalRecurrences`)، ومجموعتان كانتا
+> **مسمّاتين خطأً** (`worshipRecords` و`quranProgress`)، ومستندات `meta` و`settings`
+> كانت قوائمها المغلقة ناقصة. أُصلحت كلها في §6.
+>
+> **ولأن الادعاء «لا مجموعة بلا قاعدة» لا يُصدَّق بالقراءة، أُضيف اختبار يفرضه:**
+> `tests/rules/coverage.rules.test.ts` يقرأ قائمة المسارات من **مصدر واحد**
+> (`src/data/firebase/paths.ts` — بُناة المسارات المُقنَّنة، `02-architecture.md` §5.4)
+> ويحاول `create` **مشروعاً واحداً** على كل مسار، ويفشل لو رُدّ أيٌّ منها بـ `permission-denied`.
+> **بدونه تتكرر هذه الفئة من الأعطال عند كل مجموعة جديدة**، وتظهر للمستخدم كشاشة ميتة
+> برسالة غامضة لا تشرح شيئاً.
+
 ---
 
 ## 5. مبدأ تصميم القواعد — خمس قواعد مُلزِمة
@@ -347,6 +381,36 @@ Cross-Origin-Opener-Policy: same-origin-allow-popups
 ---
 
 ## 6. `firestore.rules` — المحتوى الكامل القابل للنشر
+
+> ### 6.0 مصدر واحد للقواعد — بند مُلزِم (تدقيق معماري)
+>
+> **(أ) هذا القسم هو ملف القواعد الوحيد القابل للنشر.** مسوّدة النواة §14.3 **لا تُنشر**:
+> فيها ع-أمن-1 القاتل (قراءة `resource.data` في تعبير يُقيَّم عند الإنشاء ⇒ **أول مصروف في
+> أي شهر جديد يُرفَض**، وإنشاء أي التزام يُرفَض)، ولا `match` فيها لعشر مجموعات مطلوبة.
+>
+> **(ب) حالة المستودع الفعلية — تحتاج إجراءً:** الملف `firestore.rules` في جذر المستودع
+> (389 سطراً، **غير منشور**) هو **مسوّدة النواة §14.3 حرفياً** مضافاً إليها
+> `match /{document=**} { allow read, write: if false; }` فقط. أي أنه **يحمل ع-أمن-1 اليوم**،
+> وينقصه `profile`, `notes`, `notes/{id}/content`, `notebooks`, `tasks`, `taskLists`,
+> `reminders`, `worshipDays`, `habits`, `quranSessions`, `zakatRecords`, `attachments`,
+> `budgetTemplates`, `scenarios`, `importBatches`, `fiscalPeriods`, `recurrenceProposals`,
+> `personalRecurrences`. **فلا يُنشر، ويُستبدل بمحتوى هذا القسم قبل أي نشر.**
+> (وهو ما يفسّر أن القواعد «مكتوبة ولم تُنشر» — والنشر بصيغتها الحالية كان سيُوقف النظام.)
+>
+> **(ج) كتلة `match` واحدة لكل مسار (ت-21).** قواعد Firestore تُقيَّم بـ **OR** بين كل كتلة
+> تطابق المسار ⇒ **الكتلة الأوسع تفوز، لا الأضيق**. ولذلك تُدمَج شروط الوثائق الشقيقة في
+> كتل هذا القسم ولا تُضاف بجانبها:
+>
+> | المسار | الكتلة الواحدة هنا تدمج |
+> |---|---|
+> | `/settings/{docId}` | ت-16 (قائمة موسَّعة) + شرطَا `settings/personal` من 09 §9 |
+> | `/notifications/{id}` | شروط هذا القسم + `id == dedupeKey` و`read == false` من 07 §16.2 |
+> | `/tasks/{id}` | ت-17 (بالاتحاد المصحَّح) + تجميد `recurrenceId`/`occurrenceKey` من 07 §16.2 |
+> | `/worshipDays/{dateKey}` · `/habits` · `/quranSessions` · `/notes/{id}/content` · `/zakatRecords` | مخططات 09 §11 (وهي المرجع لشكلها) |
+> | `/recurrenceProposals` · `/personalRecurrences` | منقولتان من 07 §16.2 كما هما |
+>
+> وقد أُلغيت ككتل في موضعها الأصلي: كتلتا `tasks` و`worshipDays` في 07 §16.2، وكتلة
+> `settings/{docId}` في 09 §11 — فكلٌّ منها كانت **الأوسع** على مسارها.
 
 ```javascript
 rules_version = '2';
@@ -1708,12 +1772,17 @@ function rebuildRunning(uid) {
 | ت-12 | `unchanged('principalMinor')` | `debts` update | أصل الدين قيمة متعاقد عليها؛ تغييره يُتلف I6 تاريخياً | متوسط: تصحيح أصل الدين يصير «دين جديد + إلغاء» |
 | ت-13 | `writtenOffMinor > 0 ⇒ direction == 'receivable'` | `debts` | الشطب للمستحق لي فقط (النواة 4.6) | لا |
 | ت-14 | `serverTime('at')` + قائمة `action` المغلقة | `auditLogs` create | T9: سجل تدقيق بوقت جهاز قابل للتلفيق ليس سجل تدقيق | نعم: يُلزم `serverTimestamp()` |
-| ت-15 | `docId in ['integrity','schema']` | `meta` | يمنع إنشاء مستندات meta عشوائية تُربك البوابة والترحيل | لا |
-| ت-16 | قائمة `settings` المغلقة | `settings` | يمنع استخدام `settings` كمخزن عام غير مُتحقَّق منه | متوسط |
-| ت-17 | `status != 'done' \|\| completedAt != null` | `tasks` | المتطلبات القسم 14: «لا تُعرض مهمة كمكتملة دون إجراء إكمال صريح» | لا |
+| ت-15 | `docId in ['integrity','schema','scheduler','quran','backup']` | `meta` | يمنع إنشاء مستندات meta عشوائية تُربك البوابة والترحيل. **صُحِّحت (تدقيق معماري):** كانت `['integrity','schema']` فقط فتحجب `meta/quran` و`meta/backup` (03-data-model §5.10) و`meta/scheduler` (07 §2.5) ⇒ سقوط استقصاء ساعة الخادم ومعه كل المُشغِّل | لا |
+| ت-16 | قائمة `settings` المغلقة: `['app','profile','notifications','dashboard','security','personal','worship','recurrence']` | `settings` | يمنع استخدام `settings` كمخزن عام غير مُتحقَّق منه. **صُحِّحت:** كانت تحجب `settings/personal` و`settings/worship` (09 §9) و`settings/recurrence` (07 §16.1) ⇒ أربع شاشات ميتة | متوسط |
+| ت-17 | `status != 'done' \|\| completedAt != null`، **والاتحاد `['open','done','cancelled']`** | `tasks` | المتطلبات القسم 14: «لا تُعرض مهمة كمكتملة دون إجراء إكمال صريح». **صُحِّح الاتحاد (تدقيق معماري):** كان `['todo','doing','done','cancelled']` بلا `'open'`، والمُشغِّل في 07 §1.2 يكتب `'open'` ومحدِّداته تستعلم به، و09 §17.1 رجع عن `todo\|inProgress` صراحةً ⇒ **كل مهمة كانت تُرفَض** | لا |
 | ت-18 | `status == 'paid' ⇒ paymentEntryIds` غير فارغ | `zakatRecords` | المتطلبات 15.4: **فصل الاحتساب عن الدفع** — مفروض من الخادم لا بالواجهة | لا |
 | ت-19 | `storagePath == 'users/{uid}/attachments/{id}'` | `attachments` | يمنع مستند مرفق يشير إلى ملف مستخدم آخر | لا |
-| ت-20 | `allow write: if false` على `users/{uid}` يبقى ⇒ الملف الشخصي في `settings/profile` | — | مُوثَّق في القسم 4 | نعم: توثيقي |
+| ت-20 | `allow write: if false` على `users/{uid}` يبقى ⇒ الملف الشخصي في **`profile/main`** | — | مُوثَّق في القسم 4 و§6. **صُحِّح (تدقيق معماري):** كان مكتوباً `settings/profile`، وهو خلاف §6 من هذه الوثيقة (`match /profile/{docId}`) وخلاف `03-data-model.md` §1.3 | نعم: توثيقي |
+| ت-21 | **كتلة `match` واحدة لكل مسار** في الملف المنشور | كل الملف | تكرار `match` على نفس المسار يُقيَّم بـ **OR** ⇒ **الأوسع تفوز**. وكانت `tasks` معرَّفة في ثلاث وثائق، و`worshipDays` في وثيقتين، و`settings` و`notifications` في ثلاث — ولو دُمجت كما كُتبت لأسقطت ت-16 وت-17 وثوابت 09 (P1, P2). **وهذا عين عيب الأسبقية الذي عالجته النواة §14.2** | لا |
+| ت-22 | `notes` بلا `bodyHtml`، وقاعدة على `notes/{id}/content/{docId}` | `notes` | الملاحظة **مستندان** وجسدها **ProseMirror JSON** لا HTML (09 §3.1 و§3.4، «صفر `innerHTML`»). اشتراط `bodyHtml` كان يرفض كل إنشاء ملاحظة، وغياب قاعدة المجموعة الفرعية كان يقتل المحرّر | لا |
+| ت-23 | `scenarios` بلا حقول نتائج (`!('resultMinor' in …)`) | `scenarios` | `03-data-model.md` §5.7: «الافتراضات فقط، بلا نتائج مخزَّنة». نتيجة مخزَّنة = رقم مالي بلا قيد ⇒ يظهر في شاشة ويُقرأ كرصيد | لا |
+| ت-24 | `importBatches.aggregatesApplied` لا يرتدّ من `true` إلى `false` | `importBatches` | الارتداد يعني إعادة تطبيق نفس المُجمَّعات ⇒ **تضخيم أرصدة بلا قيد مقابل**، وهو انحراف لا يكشفه ميزان المراجعة لأن الدفتر سليم | لا |
+| ت-25 | `fiscalPeriods` بمنع صريح `allow write: if false` | `fiscalPeriods` | محجوزة بـ ADR-008. المنع الصريح يجعل أي محاولة تفعيل محور فترات ثانٍ **تفشل صاخبةً** بدل أن تمرّ بالافتراضي ثم تُنتج ملخّصين متنافسين | لا |
 
 **قاعدة مُلزِمة على ت-2 و ت-5 و ت-10 و ت-14:** هذه الأربعة **تفشل فشلاً صاخباً** إن لم يطابقها
 كاتب البيانات. وهذا مقصود (خير من انحراف صامت)، لكنه يستوجب تشغيل حزمة اختبارات القواعد **قبل**
@@ -2065,7 +2134,7 @@ export function validExpenseEntry(over: Record<string, unknown> = {}) {
 }
 ```
 
-### 10.3 قائمة حالات الاختبار — 124 حالة
+### 10.3 قائمة حالات الاختبار — 135 حالة
 
 **العزل والهوية (ق-2)**
 
@@ -2209,15 +2278,26 @@ export function validExpenseEntry(over: Record<string, unknown> = {}) {
 | ح-96 | مهمة بـ `status='done'` و`completedAt=null` (ت-17) | **رفض** |
 | ح-97 | مهمة بـ `status='done'` و`completedAt` موجود | **نجاح** |
 | ح-98 | حذف مهمة أو ملاحظة | **نجاح** |
-| ح-99 | ملاحظة بـ `bodyHtml` يتجاوز 100,000 حرف | **رفض** |
+| ح-99 | ملاحظة بـ `searchTokens` يتجاوز 150 عنصراً (P7) · وملاحظة بـ `contentVersion` مُرتدّة (P6) | **رفض** |
+| ح-99ب | `notes/{id}/content/{docId}` بـ `docId != 'body'` · وقراءة/كتابة `content` بلا قاعدة (ع-أمن-12) | **رفض / نجاح بعد الإصلاح** |
 | ح-100 | `zakatRecords` بـ `status='paid'` و`paymentEntryIds=[]` (ت-18) | **رفض** |
 | ح-101 | `zakatRecords` بـ `status='computed'` و`paidMinor > 0` | **رفض** |
 | ح-102 | `zakatRecords` بلا `methodNote` | **رفض** |
-| ح-103 | **حذف `zakatRecords` أو `worshipRecords`** | **رفض** |
-| ح-104 | `worshipRecords` بمفتاح صلاة غير معروف (`'tahajjud'` في `prayers`) | **رفض** |
-| ح-105 | `worshipRecords` بمعرّف لا يطابق `dateKey` | **رفض** |
-| ح-106 | `quranProgress.pagesRead = 700` | **رفض** |
+| ح-103 | **حذف `zakatRecords` أو `worshipDays`** | **رفض** |
+| ح-104 | `worshipDays` بمفتاح صلاة غير معروف (`'tahajjud'` في `prayers`)، أو بأقل من الخمسة (P2) | **رفض** |
+| ح-105 | `worshipDays` بمعرّف لا يطابق `dateKey`، أو `periodKey != dateKey[0:7]` (P1) | **رفض** |
+| ح-106 | `quranSessions.ayahCount = 0` أو `> 6236`، أو `pagesTouched > 604`، أو `to.surah = 115` | **رفض** |
+| ح-106ب | `quranSessions` **إنشاء مشروع** (جلسة صحيحة) · و`habits` إنشاء مشروع | **نجاح** — كانتا مرفوضتين بلا قاعدة (ع-أمن-14) |
 | ح-107 | `settings/{docId}` بمعرّف خارج القائمة (ت-16) | **رفض** |
+| ح-107ب | `settings/personal` و`settings/worship` و`settings/recurrence` — إنشاء مشروع | **نجاح** — كانت مرفوضة (ع-أمن-10) |
+| ح-107ج | `settings/personal` بـ `weekStartsOn = 3` أو `hijriOffsetDays = 2` | **رفض** |
+| ح-107د | `meta/scheduler` و`meta/quran` و`meta/backup` — إنشاء مشروع | **نجاح** — كانت مرفوضة (ع-أمن-11) |
+| ح-107هـ | `meta/{docId}` بمعرّف خارج القائمة الموسَّعة (ت-15) | **رفض** |
+| ح-107و | مهمة بـ `status = 'open'` — إنشاء مشروع | **نجاح** — كانت مرفوضة (ع-أمن-13) |
+| ح-107ز | مهمة بـ `status = 'todo'` أو `'doing'` | **رفض** — خارج الاتحاد المعتمد |
+| ح-107ح | `scenarios` بحقل `resultMinor` (ت-23) | **رفض** |
+| ح-107ط | `importBatches` بارتداد `aggregatesApplied` من `true` إلى `false` (ت-24) | **رفض** |
+| ح-107ي | أي كتابة على `fiscalPeriods` (ت-25) | **رفض** |
 | ح-108 | `settings/app` بـ `currency='USD'` | **رفض** |
 | ح-109 | `attachments.storagePath` يشير إلى `users/{OTHER}/...` (ت-19) | **رفض** |
 | ح-110 | `attachments.sizeBytes = 6291456` (6MB) | **رفض** |
@@ -2246,7 +2326,11 @@ export function validExpenseEntry(over: Record<string, unknown> = {}) {
 | ح-123 | `runTransaction` تحاكي `payObligation` كاملة: قيد + 3 postings + 3 accounts + 3 accountPeriods + periods + budgetPeriods + obligations | **نجاح**. أي فشل بـ `permission-denied` مع صحة كل الشروط منطقياً ⇒ **تجاوز حدّ الاستدعاءات** ⇒ تطبيق بوابة الوجود (7.3) |
 | ح-124 | `runTransaction` تحاكي `voidTransaction` كاملة | **نجاح** (نفس المعيار) |
 
-> **المجموع: 124 حالة** (المطلوب كان 25 على الأقل). الحالات **ح-53 و ح-63 و ح-77 و ح-123**
+> **المجموع: 135 حالة** (المطلوب كان 25 على الأقل). أُضيفت إحدى عشرة حالة في التدقيق المعماري
+> لتغطية ع-أمن-10 … ع-أمن-15 (ح-99ب، ح-106ب، ح-107ب … ح-107ي)، وهي **اختبارات انحدار**
+> على أعطال كانت تجعل شاشات كاملة ميتة. ويُضاف إليها
+> `tests/rules/coverage.rules.test.ts` (القسم 4) الذي يفرض «لا مجموعة بلا قاعدة» آلياً.
+> الحالات **ح-53 و ح-63 و ح-77 و ح-123**
 > هي اختبارات انحدار للعيوب الثلاثة المُشخَّصة في القسم 7 — **لا تُحذف من الحزمة أبداً.**
 
 ### 10.4 نماذج تنفيذ فعلية
@@ -2479,7 +2563,9 @@ it('ح-123: معاملة payObligation كاملة لا تتجاوز حدّ اس�
     "periodLocks":      [], "entryCorrections": [], "operations": [], "auditLogs": [],
     "settings":         [], "attachments": [],
     "notes":            [], "notebooks": [], "tasks": [], "taskLists": [], "reminders": [],
-    "worshipRecords":   [], "quranProgress": [], "zakatRecords": [],
+    "worshipDays":      [], "habits": [], "quranSessions": [], "zakatRecords": [],
+    "budgetTemplates":  [], "scenarios": [], "importBatches": [],
+    "recurrenceProposals": [], "personalRecurrences": [],
     "meta":             [ { "id": "schema", "currentVersion": 1, "appliedMigrations": [] } ]
   },
 
@@ -2578,8 +2664,10 @@ export async function exportAllJson(opts?: ExportOptions): Promise<Blob>;
       رفضت القواعد (I17) ترحيل قيود الفترات المُقفلة المُستعادة.
 
 المرحلة 4 — المحتوى الشخصي
-  notes, notebooks, tasks, taskLists, reminders, worshipRecords, quranProgress,
-  zakatRecords, settings, attachments (الوصفية؛ الملفات لا تُستعاد — ق-1), auditLogs.
+  notes (+ notes/{id}/content), notebooks, tasks, taskLists, reminders,
+  worshipDays, habits, quranSessions, zakatRecords, personalRecurrences,
+  recurrenceProposals, budgetTemplates, scenarios, importBatches,
+  settings, attachments (الوصفية؛ الملفات لا تُستعاد — ق-1), auditLogs.
 
 المرحلة 5 — إعادة البناء (القسم 16 من النواة)
   5.1 meta/integrity.rebuildStatus = 'running'    ← يحتاج freshAuth() (أ-4)
@@ -2782,7 +2870,7 @@ function canWriteIn(hid) {
 
 ```bash
 # 1) التحقق من الترجمة والاختبارات (لا تخطّي، لا --force)
-npm run test:rules                      # 124 حالة — القسم 10
+npm run test:rules                      # 135 حالة — القسم 10
 
 # 2) مراجعة الفرق قبل النشر (ما يُنشر فعلاً، لا ما في الذاكرة)
 git diff --stat firestore.rules storage.rules
@@ -2884,7 +2972,12 @@ firebase deploy --only firestore:rules --project raseed-2fac1
 
 - [ ] `firestore.rules` يُترجَم بلا خطأ في المحاكي (يكشف ع-أمن-4).
 - [ ] `storage.rules` يُترجَم بلا خطأ.
-- [ ] 124 حالة اختبار **كلها خضراء**، وفيها ح-53 و ح-63 و ح-77 و ح-123 و ح-124.
+- [ ] 135 حالة اختبار **كلها خضراء**، وفيها ح-53 و ح-63 و ح-77 و ح-123 و ح-124،
+      و**حالات التدقيق المعماري** ح-99ب و ح-106ب و ح-107ب…ح-107ي.
+- [ ] `firestore.rules` في جذر المستودع **استُبدل بمحتوى §6** (انظر 6.0 ب): الملف الحالي
+      هو مسوّدة النواة §14.3 وفيها ع-أمن-1 القاتل، وينقصها ثماني عشرة `match`.
+- [ ] `tests/rules/coverage.rules.test.ts` أخضر: `create` مشروع واحد على **كل** مسار في
+      `src/data/firebase/paths.ts` ⇒ لا مجموعة مطلوبة بلا قاعدة.
 - [ ] **ح-123 و ح-124 قياس حقيقي** لميزانية استدعاءات الوصول، والنتيجة مُسجَّلة في الوثيقة.
 - [ ] `grep REPLACE_WITH_OWNER_UID` لا يُطابق شيئاً في أي ملف قواعد.
 - [ ] كل مجموعة في الكود لها قاعدة (جدول القسم 4 مُحدَّث).
@@ -2962,9 +3055,33 @@ firebase deploy --only firestore:rules --project raseed-2fac1
 7. **سجل التدقيق غير قابل للتلاعب**: إنشاء فقط، بوقت الخادم، بهوية الكاتب، وبقائمة أفعال مغلقة.
 8. **التصدير JSON ميزة أمنية أولى لا رفاهية**، والاستعادة **لا تُعتبر ناجحة قبل مطابقة البصمة**.
 9. **مفتاح API عام بالتصميم**، وتقييده ضبط حصص. **وApp Check مؤجَّل بقرار موثَّق لا بإهمال.**
-10. **124 حالة اختبار بوابة للنشر**، وفيها اختبارات انحدار صريحة لكل عيب من عيوب القسم 7.
+10. **135 حالة اختبار بوابة للنشر**، وفيها اختبارات انحدار صريحة لكل عيب من عيوب القسم 7
+    ولكل عيب من ع-أمن-10 … ع-أمن-15 المكتشفة في التدقيق المعماري.
 
 > **القواعد ليست جاهزة لمجرد كتابتها.** هذه الوثيقة تصميم مكتمل وملف قابل للنشر،
-> لكن **لا نشر قبل: ترجمة نظيفة، 124 حالة خضراء، قياس ميزانية الاستدعاءات، وقرارات المالك 1 و4 و5.**
+> لكن **لا نشر قبل: ترجمة نظيفة، 135 حالة خضراء، قياس ميزانية الاستدعاءات،
+> استبدال `firestore.rules` بمحتوى §6، وقرارات المالك 1 و4 و5.**
+
+---
+
+> تعديل اتساق (تدقيق معماري): أُضيف **§6.0** مُثبِّتاً أن §6 هو ملف القواعد الوحيد القابل للنشر،
+> وأن `firestore.rules` في جذر المستودع هو **مسوّدة النواة §14.3 حرفياً** وفيها ع-أمن-1 القاتل
+> وتنقصها ثماني عشرة `match` ⇒ لا يُنشر ويُستبدل. وثُبِّت **ت-21**: كتلة `match` واحدة لكل مسار،
+> لأن التكرار يُقيَّم بـ OR فتفوز الأوسع — وكانت `tasks` في ثلاث وثائق و`worshipDays` و`settings`
+> و`notifications` في اثنتين أو ثلاث. وأُصلحت في §6 ستة أعطال تحجب عمليات مشروعة:
+> **ع-أمن-10** قائمة `settings` المغلقة (نقصها `personal`/`worship`/`recurrence`)؛
+> **ع-أمن-11** قائمة `meta` المغلقة (نقصها `scheduler`/`quran`/`backup` — وبغياب `scheduler`
+> يسقط استقصاء ساعة الخادم ومعه حتمية مفاتيح الدورات)؛
+> **ع-أمن-12** `notes` باشتراط `bodyHtml` غير الموجود + غياب قاعدة `notes/{id}/content`؛
+> **ع-أمن-13** اتحاد حالات المهمة بلا `'open'` ⇒ كل مهمة تُرفَض؛
+> **ع-أمن-14** تعارض الأسماء الثلاثي (`worshipDays` و`quranSessions` و`habits`)؛
+> **ع-أمن-15** ست مجموعات بلا قاعدة (`budgetTemplates`, `scenarios`, `importBatches`,
+> `fiscalPeriods`, `recurrenceProposals`, `personalRecurrences`).
+> §4 صُحِّح `profiles ⇒ profile/main` (وت-20 معه)، وأُضيفت صفوف المجموعات الناقصة،
+> وأُضيف `tests/rules/coverage.rules.test.ts` ليفرض «لا مجموعة بلا قاعدة» آلياً بدل الادعاء.
+> §3.1 صُحِّح المسار `infra/firebase/auth.ts ⇒ src/data/firebase/auth.ts` وسُجِّلت فجوتان في
+> الكود المنفَّذ: غياب التراجع إلى `signInWithRedirect` (ومزوّد وحيد ⇒ حجب النافذة = لا وصول)،
+> وغياب `reauthenticate`/`setPersistence` (و`freshAuth()` مفروضة في القواعد ⇒ لا مخرج).
+> §7.5 أُضيفت التشديدات ت-21…ت-25، و§10.3 رُفعت الحالات من 124 إلى **135**.
 
 </div>

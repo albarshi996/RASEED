@@ -5,7 +5,10 @@ import { defineConfig } from 'vitest/config'
  * تُشغَّل عبر: npm run test:rules  (يُشغّل المحاكي ثم ينفّذ)
  * مفصولة عن vitest.config.ts حتى لا يتعطّل `npm test` على جهاز بلا Java.
  */
+import { fileURLToPath, URL } from 'node:url'
+
 export default defineConfig({
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   test: {
     environment: 'node',
     include: ['tests/rules/**/*.test.ts'],

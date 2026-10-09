@@ -971,8 +971,8 @@ export function runReportReconciliation(
 | R13 | `savingsGoals` | الادخار والأهداف | `financialGoals` + لقطة `accounts` + `postings{goalId}` + `periods` | إجمالي المخصَّص، التقدم لكل هدف، المطلوب شهرياً، معدَّل الادخار ×12 | ≤10 + 0 + 2/هدف | XLSX, CSV, PDF |
 | R14 | `accountStatement` | حركة الحسابات (كشف الحساب) | `journalEntries where accountIds array-contains A && bookedAt ∈ [range] order by bookedAt` + `accountPeriods` للاتجاه | مدين، دائن، الصافي، الرصيد الجاري (الصفحة الأولى فقط)، الحركة الشهرية | 25/صفحة + ≤12 | XLSX, CSV, PDF |
 | R15 | `cashFlow` | التدفق النقدي | `accountPeriods where periodKey==P` (نقدية) + `periods/{P}` | ΔCash، الجسر المُصنَّف، **الفرق غير المُصنَّف**، الاتجاه ×12 | ≤10/شهر + 1/شهر | XLSX, CSV, PDF |
-| R16 | `tasks` | المهام والإنجازات | `tasks where completedAt ∈ range` + `tasks where status in [todo,doing]` | المكتملة، المتأخرة، نسبة الإنجاز، نسبة الالتزام بالموعد، حسب القائمة والأولوية | ≤200 | XLSX, CSV, PDF |
-| R17 | `worship` | متابعة العبادات | `worshipRecords where dateKey ∈ range` + `quranProgress where dateKey ∈ range` | المسجَّل، غير المسجَّل، نسبة على المسجَّل، صفحات القرآن، نسبة الورد، السلسلة | ≤2×أيام النطاق | XLSX, CSV, PDF |
+| R16 | `tasks` | المهام والإنجازات | `tasks where trashed==false && status=='done' && completedOn ∈ range` + `tasks where trashed==false && status in [todo,inProgress]` | المكتملة، المتأخرة، نسبة الإنجاز، نسبة الالتزام بالموعد، حسب القائمة والأولوية | ≤200 | XLSX, CSV, PDF |
+| R17 | `worship` | متابعة العبادات | `worshipDays where periodKey==pk order by dateKey` + `quranSessions where periodKey==pk order by dateKey` | المسجَّل، غير المسجَّل، نسبة على المسجَّل، آيات القرآن (أساسي) وصفحاته (ثانوي)، نسبة الورد، السلسلة | ≤2×أيام النطاق | XLSX, CSV, PDF |
 
 > **قاعدة التصدير الموحَّدة:** الصيغ الثلاث متاحة لكل التقارير الـ17. الاستثناء الوحيد:
 > **PDF لا يُصدَّر لجدول > 2,000 صف** (يُقترح XLSX بدلاً منه برسالة صريحة) — القسم 9.5.

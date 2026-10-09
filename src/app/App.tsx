@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 
 import { connectEmulatorsOnce } from '@/data/firebase/app'
 import { observeSession, signOut, type SessionUser } from '@/data/firebase/auth'
+import { Dashboard } from '@/features/dashboard/Dashboard'
 import { SignInScreen } from '@/features/auth/SignInScreen'
-import { formatLYD, unsafeMinor } from '@/domain/money'
 import { env } from '@/lib/env'
 import { today } from '@/lib/time'
 
@@ -37,8 +37,8 @@ function Splash(): React.ReactElement {
 /**
  * هيكل مؤقت لما بعد تسجيل الدخول.
  *
- * **لا يعرض أي رقم مالي مُختلَق.** المبالغ أدناه أصفار حقيقية لأن قاعدة البيانات فارغة
- * ولم تُبنَ طبقة القراءة بعد — عرض أرقام تجريبية هنا يخالف القسم 25 بند 4 من المتطلبات.
+ * يعرض لوحة التحكم الحقيقية: الأرصدة من Firestore، ونموذج تسجيل المصروف،
+ * وآخر العمليات. لا رقم واحد مُختلَق — كل مبلغ مشتق من قيود فعلية.
  */
 function Shell({ user }: { user: SessionUser }): React.ReactElement {
   const isOwner = env.VITE_OWNER_UID === '' || user.uid === env.VITE_OWNER_UID
@@ -80,35 +80,7 @@ function Shell({ user }: { user: SessionUser }): React.ReactElement {
           </p>
         )}
 
-        <section
-          className="rounded-2xl border p-6"
-          style={{ background: 'var(--surface-warm)', borderColor: 'var(--border-subtle)' }}
-        >
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            أهلًا، {user.displayName ?? 'بك'}
-          </p>
-          <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-            UID: <span dir="ltr">{user.uid}</span>
-          </p>
-          <p className="mt-4 text-3xl font-bold" data-money>
-            {formatLYD(unsafeMinor(0))}
-          </p>
-          <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-            إجمالي الأموال المتاحة — لا توجد حسابات بعد
-          </p>
-        </section>
-
-        <section
-          className="mt-6 rounded-2xl border p-6 text-sm leading-relaxed"
-          style={{ background: 'var(--surface-card)', borderColor: 'var(--border-subtle)' }}
-        >
-          <h2 className="mb-3 font-semibold">حالة التأسيس</h2>
-          <ul className="space-y-2" style={{ color: 'var(--text-secondary)' }}>
-            <li>✅ المصادقة تعمل — أنت مسجَّل الدخول الآن.</li>
-            <li>✅ وحدة المال والزمن ومُولِّد المعرّفات منفَّذة ومختبَرة.</li>
-            <li>⏳ طبقة البيانات والشاشات المالية قيد البناء.</li>
-          </ul>
-        </section>
+        <Dashboard uid={user.uid} />
       </main>
     </div>
   )

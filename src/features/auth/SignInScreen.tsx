@@ -70,7 +70,7 @@ export function SignInScreen(): React.ReactElement {
         </button>
 
         {failure !== null && (
-          <p
+          <div
             role="alert"
             className="mt-4 rounded-lg border p-3 text-right text-xs leading-relaxed"
             style={{
@@ -79,8 +79,19 @@ export function SignInScreen(): React.ReactElement {
               color: 'var(--fin-expense)',
             }}
           >
-            {SIGN_IN_ERROR_AR[failure]}
-          </p>
+            <p>{SIGN_IN_ERROR_AR[failure]}</p>
+            {failure === 'PROVIDER_DISABLED' && (
+              <a
+                href="https://console.firebase.google.com/project/raseed-2fac1/authentication/providers"
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 block rounded-lg px-3 py-2 text-center font-semibold underline"
+                style={{ background: 'var(--surface-card)' }}
+              >
+                افتح صفحة التفعيل ← Google ← Enable ← Save
+              </a>
+            )}
+          </div>
         )}
 
         <p className="mt-6 text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>

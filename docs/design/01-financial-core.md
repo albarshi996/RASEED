@@ -3558,6 +3558,22 @@ pendingCommands: status (==) + createdAtClient ASC
 **استثناءات الفهرسة الأحادية (لتقليل تكلفة الكتابة):** إلغاء فهرسة `lines`, `description`,
 `attachmentIds`, `payloadHash`, `ancestorIds`, `notes`, `template` — لا نستعلم عليها، وكل حقل مفهرس
 يزيد تكلفة الكتابة وحجم الفهرس.
+**ولا يُلغى فهرس حقل تُجمَّعه `sum()` خادمياً** (`signedAmountMinor`, `settlementDeltaMinor`,
+`isCashLike`, `accountTypes`): التجميع يحتاج الحقل المُجمَّع **داخل** الفهرس، وإلغاؤه يُسقط
+I5b و I6b و I11 معاً.
+
+> ### تعديل اتساق (تدقيق مالي) — هذه القائمة **ناقصة ومتجاوَزة**، والمصدر المنشور غيرها
+>
+> **لا يُنشر `firestore.indexes.json` من هذا القسم.** المصدر الوحيد للملف المنشور هو
+> `03-data-model.md` §10.1/§10.2 (**96 فهرساً و55 استثناءً**)، وهو يضمّ هذه القائمة
+> ويضيف إليها ما تحتاجه الوثائق التابعة بفهارس مُسمّاة لكل استعلام. وما يلزم تصحيحه **هنا**:
+>
+> | السطر في 15.5 | الحكم | البديل المنشور |
+> |---|---|---|
+> | `obligations: remainingMinor (>) + dueDate ASC` | **غير قابل للتنفيذ** — Firestore يشترط أن يكون أول فرز على حقل المتباينة، فيُرفض الاستعلام بـ `The first orderBy() field must match the inequality field` | حقل مشتق `isOpen` ⇒ `OB1` و`OB3`…`OB8`. **`isOpen` غير معرَّف في §4.5/§4.6 ⇒ يحتاج ADR** (03 §17/١). ويبقى `OB7` = `remainingMinor↓ + dueDate↑` لخدمة «الأكبر متبقياً» |
+> | `postings: tags (array-contains) + periodKey (==)` | **يُرجع صفراً دائماً** — وسوم القيد تُنسخ على **كل** سطوره (§4.4) ⇒ رجل المصروف `+X` ورجل النقد `−X` فيتصافران | `PG4` = `periodKey + accountType + tags◇ + signedAmountMinor` (شرط صحة لا تحسين — `06` §5.4/ر-2 و M-I19) |
+> | `journalEntries: status (==) + bookedAtTs DESC` | سليم، **لكن** `status == 'posted' && kind != 'reversal'` غير قابل للفهرسة | `kind in [...]` على الفهرس `JE4` = `status + kind + bookedAtTs↓` (03 §9.1(ب)) |
+> | «`sum` و`count` = قراءتان» في 15.4 | **رقم ثابت خاطئ** | الفاتورة `⌈n/1000⌉` قراءة بحدّ أدنى 1 (`06` §14/ر-12). لا ينكسر أي قرار، لكن **لا يُشغَّل الفاحص على المسار الساخن** بناءً على «قراءتين» |
 
 ---
 
@@ -4137,3 +4153,20 @@ export const integrity = {
 
 > **أي انحراف عن هذه الوثيقة في الكود = عيب يُصلَح، لا قرار يُناقَش.**
 > وأي تغيير فيها يحتاج ADR جديداً وموافقة المالك.
+
+---
+
+> تعديل اتساق (تدقيق مالي): §4 **لم يُلمس** — هو الحَكَم، وعليه وُحِّدت أسماء الحقول في
+> `firestore.indexes.json` و`03-data-model.md` §10 (`status` لا `reversed`، `bookedAtTs` لا
+> `bookedAt` في ترتيب القيود، `lineNo` لا `lineIndex`، `obligationId`/`debtId`/`goalId` **قياسية
+> على `postings`** مقابل `refs.*` **على `journalEntries` وحدها**، `expectedSettleAt` لا
+> `debts.dueDate`، `targetId`/`targetCollection`/`before`/`after` لا `targetEntryId`/`beforeAfter`،
+> `createdAtClient` لا `pendingCommands.createdAt`، **ولا حقل `scope` على القيد إطلاقاً** —
+> النطاق المنزلي وسمٌ في `tags` كما في §4.3). · وأُضيف إلى §15.5 بيانٌ بأن **الملف المنشور
+> مصدره `03` §10** لا هذا القسم، مع جدول بثلاثة أسطر هنا لا تصلح كما هي
+> (`obligations: remainingMinor (>) + dueDate ASC` ترفضه Firestore، و
+> `postings: tags + periodKey` يُرجع صفراً بلا `accountType`، و`status + kind != 'reversal'`)
+> وتصحيح «`sum` = قراءتان» إلى `⌈n/1000⌉`. · ومُنع صريحاً إلغاء فهرسة أي حقل تُجمَّعه `sum()`
+> لأن I5b و I6b و I11 تسقط به. · **ولا تعديل على جدول §9 (جدول الحقيقة):** وُجد مطابقاً، وصُحِّحت
+> الوثائق التابعة عليه — خاصةً R6/ب (الشراء بالأجل **يستهلك الميزانية**) و R7 (شطب المستحق
+> **مصروف بلا نقد** ⇒ فرق غير مُصنَّف حتمي).

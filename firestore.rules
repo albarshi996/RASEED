@@ -8,10 +8,25 @@ service cloud.firestore {
   function allowedUids() {
     return ['REPLACE_WITH_OWNER_UID'];   // + UID احتياطي عند الحاجة
   }
+  // ── مسار الإقلاع (bootstrap) — مؤقّت وموثَّق ───────────────────────────
+  // ق-2 يقضي بأن الإغلاق على UID لا على البريد، لأن البريد قابل للتغيير.
+  // لكن UID لا يُعرف إلا بعد أول تسجيل دخول، ونشر القواعد بالعنصر النائب وحده
+  // يُغلق النظام على المالك نفسه فلا يستطيع الدخول أصلًا.
+  //
+  // لذلك يُقبل **مؤقتًا** بريد Google المُتحقَّق منه. وهذا ليس إضعافًا أمنيًا:
+  // Google هي من تُصدر email_verified ولا يستطيع أحد انتحال بريد لا يملكه.
+  // القيد الحقيقي أن البريد قد يتغيّر مستقبلًا، ولهذا **يُحذف هذا المسار
+  // فور تثبيت UID المالك في allowedUids أعلاه**.
+  function isBootstrapOwner() {
+    return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'albarshi.96@gmail.com';
+  }
+
   function isOwner(uid) {
     return request.auth != null
         && request.auth.uid == uid
-        && uid in allowedUids();          // ← الإغلاق الفعلي (ق-2)
+        && (uid in allowedUids() || isBootstrapOwner());   // ← الإغلاق الفعلي (ق-2)
   }
 
   function isPosInt(v) {
@@ -78,9 +93,6 @@ service cloud.firestore {
     }
     function periodNotLocked(uid, pk) {
       return !exists(/databases/$(database)/documents/users/$(uid)/periodLocks/$(pk));
-    }
-    function accountExists(uid, id) {
-      return exists(/databases/$(database)/documents/users/$(uid)/accounts/$(id));
     }
     match /users/{uid} {
 
@@ -230,10 +242,13 @@ service cloud.firestore {
           && isNonNegInt(request.resource.data.creditMinor)
           && request.resource.data.netMinor is int
           && request.resource.data.periodKey is string
-          && (rebuildRunning(uid)
+          // الإنشاء أولًا: على create يكون resource == null، وقراءة resource.data قبل
+          // هذا الفحص ترمي «Null value error» فيُرفض **أول مصروف في كل شهر جديد**.
+          // كما يوفّر هذا قراءة exists() كاملة لكل كتابة.
+          && (resource == null
+              || rebuildRunning(uid)
               || (   request.resource.data.debitMinor  >= resource.data.debitMinor
-                  && request.resource.data.creditMinor >= resource.data.creditMinor )
-              || !exists(/databases/$(database)/documents/users/$(uid)/accountPeriods/$(id)));
+                  && request.resource.data.creditMinor >= resource.data.creditMinor ));
         allow delete: if false;
       }
 
@@ -274,7 +289,8 @@ service cloud.firestore {
                request.resource.data.totalMinor + request.resource.data.extraChargesMinor
                - request.resource.data.paidMinor
           // القيمة الأصلية المتعاقد عليها لا تُرفع لاستيعاب تجاوز (ADR-012)
-          && (!('totalMinor' in resource.data.keys())
+          // على create لا يوجد resource، و resource.data.keys() ترمي ⇒ كل التزام جديد يُرفض.
+          && (resource == null
               || request.resource.data.totalMinor == resource.data.totalMinor
               || rebuildRunning(uid));
         allow delete: if false;

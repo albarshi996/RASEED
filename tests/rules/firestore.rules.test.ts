@@ -264,3 +264,108 @@ describe('عزل البيانات — استعلامات المجموعات', ()
     await assertFails(getDocs(collection(intruder(), `users/${OWNER_UID}/journalEntries`)))
   })
 })
+
+describe('الإنشاء المدموج مع التحديث — resource == null (عيب حاجب رُصد في التدقيق)', () => {
+  it('ينشئ accountPeriods جديدًا — أول مصروف في شهر جديد', async () => {
+    await assertSucceeds(
+      setDoc(doc(owner(), `users/${OWNER_UID}/accountPeriods/asset.cash__2026-03`), {
+        ownerUid: OWNER_UID,
+        accountId: 'asset.cash',
+        periodKey: '2026-03',
+        debitMinor: 0,
+        creditMinor: 25500,
+        netMinor: -25500,
+      }),
+    )
+  })
+
+  it('يحدّث accountPeriods بزيادة فقط', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `users/${OWNER_UID}/accountPeriods/asset.cash__2026-03`), {
+        ownerUid: OWNER_UID,
+        accountId: 'asset.cash',
+        periodKey: '2026-03',
+        debitMinor: 0,
+        creditMinor: 25500,
+        netMinor: -25500,
+      })
+    })
+    await assertSucceeds(
+      setDoc(doc(owner(), `users/${OWNER_UID}/accountPeriods/asset.cash__2026-03`), {
+        ownerUid: OWNER_UID,
+        accountId: 'asset.cash',
+        periodKey: '2026-03',
+        debitMinor: 0,
+        creditMinor: 40000,
+        netMinor: -40000,
+      }),
+    )
+  })
+
+  it('يرفض تراجع المجمَّع — الحركة لا تنقص أبدًا', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `users/${OWNER_UID}/accountPeriods/asset.cash__2026-03`), {
+        ownerUid: OWNER_UID,
+        accountId: 'asset.cash',
+        periodKey: '2026-03',
+        debitMinor: 0,
+        creditMinor: 25500,
+        netMinor: -25500,
+      })
+    })
+    await assertFails(
+      setDoc(doc(owner(), `users/${OWNER_UID}/accountPeriods/asset.cash__2026-03`), {
+        ownerUid: OWNER_UID,
+        accountId: 'asset.cash',
+        periodKey: '2026-03',
+        debitMinor: 0,
+        creditMinor: 1,
+        netMinor: -1,
+      }),
+    )
+  })
+
+  const obligation = (over: Record<string, unknown> = {}) => ({
+    ownerUid: OWNER_UID,
+    nature: 'expense',
+    totalMinor: 800000,
+    extraChargesMinor: 0,
+    paidMinor: 0,
+    remainingMinor: 800000,
+    ...over,
+  })
+
+  it('ينشئ التزامًا جديدًا', async () => {
+    await assertSucceeds(setDoc(doc(owner(), `users/${OWNER_UID}/obligations/rent-2026-03`), obligation()))
+  })
+
+  it('يرفض سدادًا يتجاوز المستحق — I5 من الخادم', async () => {
+    await assertFails(
+      setDoc(
+        doc(owner(), `users/${OWNER_UID}/obligations/rent-2026-03`),
+        obligation({ paidMinor: 900000, remainingMinor: -100000 }),
+      ),
+    )
+  })
+
+  it('يرفض remainingMinor غير متسق مع المعادلة', async () => {
+    await assertFails(
+      setDoc(
+        doc(owner(), `users/${OWNER_UID}/obligations/rent-2026-03`),
+        obligation({ paidMinor: 200000, remainingMinor: 700000 }),
+      ),
+    )
+  })
+
+  it('يرفض رفع القيمة الأصلية للالتزام — ADR-012', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `users/${OWNER_UID}/obligations/rent-2026-03`), obligation())
+    })
+    await assertFails(
+      setDoc(
+        doc(owner(), `users/${OWNER_UID}/obligations/rent-2026-03`),
+        obligation({ totalMinor: 900000, remainingMinor: 900000 }),
+      ),
+    )
+  })
+})

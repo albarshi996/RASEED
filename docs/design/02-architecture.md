@@ -94,9 +94,26 @@
 | `vite.config.ts` | — | **موجود** بإعداد PWA كامل (`registerType: 'prompt'`, `runtimeCaching: []`) |
 | `tsconfig.json` | — | **موجود** بصرامة كاملة (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `erasableSyntaxOnly`) |
 | `eslint.config.js` | — | **موجود** بحدود طبقات مُنفَّذة بقواعد ESLint الأصلية |
-| الكود | لا شيء | `src/domain/money/{types,arithmetic,rate,allocate}.ts` **مكتوبة** |
+| الكود | لا شيء | `src/domain/money/**` **مكتوبة** |
 | `.env.example` / `.env.local` / `.firebaserc` | — | **موجودة** (`default: raseed-2fac1`) |
 | سكربتات `package.json` | — | **لا يوجد أي سكربت** — `"scripts"` غائب كلياً |
+
+> **تحديث الحالة (تدقيق معماري) — الجدول أعلاه صار قديماً، ويُقرأ كلقطة تاريخية لا كحالة راهنة.**
+> الحالة الفعلية الآن:
+>
+> | البند | الحالة |
+> |---|---|
+> | سكربتات `package.json` | **18 سكربتاً موجودة**: `dev`, `build`, `preview`, `typecheck`, `lint`, `lint:fix`, `format`, `format:check`, `test`, `test:watch`, `test:coverage`, `test:rules`, `emulators`, `deploy:rules`, `deploy:hosting`, `verify`. وتبقى **ناقصة** عن §12.2: `lint:bounds` و`test:e2e` و`lighthouse` |
+> | الكود المكتوب | `src/domain/money/**` (9 ملفات، كاملة) · `src/domain/types/**` (11 ملفاً) · `src/lib/{time,ulid,env}.ts` · `src/data/firebase/{app,auth}.ts` · `src/ui/styles/{tokens,index}.css` · `src/app/App.tsx` · `src/features/auth/SignInScreen.tsx` · `src/main.tsx` |
+> | الاختبارات | **144 اختباراً خضراء** في 4 ملفات (`tests/unit/{money,arithmetic,time,ulid}.test.ts`) + `tests/rules/helpers.ts`. تغطية 96.7% |
+> | القواعد والفهارس | `firestore.rules` (389 سطراً) و`firestore.indexes.json` (20 فهرساً) **مكتوبان ولم يُنشرا**. و`firestore.rules` **هو مسوّدة النواة §14.3 حرفياً** ⇒ لا يُنشر (انظر §14.2 والقسم 6.0 في `04-security.md`) |
+> | Java / محاكي القواعد | **Java غير مثبَّتة** ⇒ `npm run test:rules` لم يُشغَّل بعد ⇒ **لا قاعدة واحدة مُختبَرة**. وهذا شرط نشر في المتطلبات §25 بند 10 |
+> | مزوّد Google في الكونسول | **غير مُفعَّل بعد** ⇒ `signInWithGoogle` يُعيد `PROVIDER_DISABLED` |
+> | `npm audit` | **صفر ثغرات**، والبناء ينجح |
+>
+> **ما لم يُنشأ بعد من هذه الوثيقة:** `src/data/{tx,ledger,codecs,live,repos,outbox,seed,export}/**`،
+> و`src/domain/{ledger,ops,recurrence,…}/**`، و`src/stores/**`، وكل `src/features/**` عدا المصادقة،
+> و`scripts/verify-layers.mjs`، و`.husky/**`، و`.github/workflows/**`، و`playwright.config.ts`.
 
 **أثر ذلك على هذه الوثيقة — ثلاث قواعد التزمتها:**
 
@@ -264,7 +281,7 @@ features  ──(OperationRequest)──►  data/ledger/postOperation  ──�
 | **B8** | `toFixed(`/`toLocaleString(`/`Intl.NumberFormat` في `ui`/`features` | `no-restricted-syntax` | **تُضاف** |
 | **B9** | `Date.now()`/`new Date()`/`crypto.randomUUID()`/`serverTimestamp()` داخل `decide` | حظر `new Date()` عام + مراجعة التوقيع | **مُنفَّذة** (`new Date()`) |
 | **B10** | `entry.kind` داخل `domain/rules/classify.ts` أو أي محدِّد يحسب رقماً | `no-restricted-syntax` على `src/domain/selectors/**` | **تُضاف** |
-| **B11** | `getDocFromCache`/`getDocsFromCache`/`getDocFromServer` ممنوعة **في كل المشروع** | `no-restricted-imports` على أسماء المصدَّرات | **تُضاف** — §9.3 |
+| **B11** | `getDocFromCache`/`getDocsFromCache`/`getDocFromServer`/`getDocsFromServer` ممنوعة في كل المشروع **عدا `src/data/scheduler/clock.ts`** | `no-restricted-imports` على أسماء المصدَّرات + استثناء مسار واحد | **تُضاف** — §9.3 |
 | **B12** | `enableIndexedDbPersistence`/`enableMultiTabIndexedDbPersistence` (مهجورة) | `no-restricted-imports` | **تُضاف** |
 | **B13** | أصناف Tailwind الاتجاهية (`ml-`,`mr-`,`pl-`,`pr-`,`text-left`,`text-right`,`left-`,`right-`) | `no-restricted-syntax` على `className` | **تُضاف** — §13.1 |
 | **B14** | أي معرّف ينتهي بـ `Minor` داخل `src/stores/**` | `no-restricted-syntax` | **تُضاف** — ADR-039 |
@@ -328,6 +345,21 @@ features  ──(OperationRequest)──►  data/ledger/postOperation  ──�
       }],
     }],
   },
+},
+// ── استثناء B11 الوحيد: استقصاء ساعة الخادم ────────────────────────────
+// ⚠ أُضيف في التدقيق المعماري. `07-recurrence-notifications.md` §2.5 يفرض أن «اليوم»
+//    يُستنبط من **ساعة الخادم** لا من ساعة الجهاز، لأن المفاتيح الحتمية تمنع كتابة نفس
+//    المفتاح مرتين ولا تمنع كتابة المفتاح **الخطأ** (جهاز بساعة متأخرة يومين يكتب دورة
+//    بتاريخ خاطئ في دفتر لا يُحذف منه شيء).
+//    وبما أن `persistentLocalCache` مُفعَّل (ADR-030)، فإن `getDoc` العادي يُعيد قيمة
+//    `probeAt` من الكاش المحلي قبل وصول الكتابة للخادم ⇒ `skewMs ≈ 0` دائماً
+//    ⇒ **الحارس يصير صورياً، وهو أسوأ من غيابه**. فلا بديل عن `getDocFromServer`.
+//    التكلفة: قراءة واحدة + كتابة واحدة في الجلسة (07 §17).
+//    (ملاحظة تصحيح: وثيقة 07 كانت تكتب `getDoc(ref, { source: 'server' })` — وهو **غير
+//     موجود** في الـ SDK المعياري؛ الخيار `source` من واجهة compat/الهاتف. صُحِّح هناك.)
+{
+  files: ['src/data/scheduler/clock.ts'],
+  rules: { 'no-restricted-imports': 'off' },
 },
 // ── B13: RTL حقيقي — لا أصناف اتجاهية فيزيائية ──────────────────────────
 {
@@ -720,6 +752,15 @@ src/data/
    ├─ exportAllJson.ts     تصدير كامل مع schemaVersion و projectionVersion (ق-1)
    └─ importJson.ts        استيراد الدفتر فقط ثم إعادة بناء (النواة §17.3)
 ```
+
+> **انحرافان قائمان في الكود عن هذه الشجرة — مُقَرّان (تدقيق معماري):**
+>
+> | في الشجرة | في الكود المنفَّذ | الحكم |
+> |---|---|---|
+> | `firebase/emulators.ts` ملفاً مستقلاً | `connectEmulatorsOnce()` **داخل** `firebase/app.ts` | **أُقِرّ.** الدالة سبعة أسطر وتُستدعى مرة واحدة من نفس وحدة التهيئة؛ ملف لدالة واحدة لا يضيف حدّاً |
+> | `auth/{googleSignIn,session,ownerCheck}.ts` | **ملف واحد** `firebase/auth.ts` يحمل `observeSession` و`signInWithGoogle` و`signOut` و`SIGN_IN_ERROR_AR` | **أُقِرّ مؤقتاً.** ويُفصَل عند إضافة `signOutCompletely` (§11.2، خمس خطوات تلمس `queryClient` و`stores` و`liveRegistry`) لأنها **تستورد من `live/` و`stores/`** فلا موضع لها في وحدة تهيئة Firebase. و`ownerCheck` يبقى **تجربة استخدام لا أمان** (§11.2) |
+>
+> **ولا `src/infra/**` في المشروع إطلاقاً** — وقد أشار إليه `04-security.md` §3.1 خطأً، وصُحِّح هناك.
 
 ### 5.5 `src/ui/` — نظام التصميم والمكوّنات الغبية
 
@@ -2298,7 +2339,7 @@ ensureSeed(uid):
 ### 11.5 ADR-033 — التاريخ المحاسبي بتوقيت طرابلس الثابت
 
 ```ts
-// lib/time/tripoli.ts
+// src/lib/time.ts   ← المسار الفعلي (لا `lib/time/tripoli.ts` — انظر §14.1 د-7)
 /**
  * ليبيا على UTC+2 ثابتاً، **بلا توقيت صيفي**. هذا يجعل الإزاحة ثابتة ويُغني عن مكتبة مناطق زمنية.
  *
@@ -2307,14 +2348,26 @@ ensureSeed(uid):
  * **periodKey مختلفاً لنفس اللحظة** ⇒ مصروف ليلة 31 أكتوبر يهبط في نوفمبر على جهاز وأكتوبر
  * على آخر ⇒ ملخّصان شهريان متناقضان لا يكشفهما أي ثابت، ولا يُصلَحان إلا بقيد عكس.
  */
-const TRIPOLI_OFFSET_MINUTES = 120
+export const LIBYA_UTC_OFFSET_MINUTES = 120              // الاسم الفعلي في الكود
 
-export function todayDateKey(): DateKey
-export function toDateKey(instant: Date): DateKey
-export function nowIso(): string
-export function dateKeyToUtcNoon(dk: DateKey): Date      // bookedAtTs — منتصف نهار UTC
-export function periodKeyOf(dk: DateKey): PeriodKey      // ≡ dk.slice(0,7)
+// ── التسميات الفعلية المُصدَّرة من `src/lib/time.ts` (تدقيق معماري: صُحِّحت) ──
+export function today(): ISODate                          // لا `todayDateKey()`
+export function toLibyaISODate(epochMs: number): ISODate   // لا `toDateKey(instant: Date)`
+export function nowISO(): ISOTimestamp                     // لا `nowIso()`
+export function periodKeyOf(date: ISODate): PeriodKey      // ≡ date.slice(0,7)  ✔ مطابق
+export function currentPeriodKey(): PeriodKey
+export function libyaDateToUtcMs(date: ISODate): number
+export function setClock(fn: () => number): void           // حقن ساعة الخادم (07 §2.5)
+
+// ── المطلوب ولم يُنفَّذ بعد في نفس الملف ──
+export function dateKeyToUtcNoon(dk: ISODate): Date        // bookedAtTs — **12:00 UTC**
+export function startOfWeek(dk: ISODate): ISODate          // السبت (05 §8.6، و07 §2.4 المصحَّح)
 ```
+
+> **النوع هو `ISODate` لا `DateKey`** في الكود المنفَّذ (وهو `string & { __isoDate }` موسوم).
+> واسم `DateKey` يبقى مستخدَماً في الوثائق الشقيقة 07 و09 ⇒ **أحدهما يُوحَّد قبل أول استيراد
+> متقاطع**، وإلا نشأ نوعان موسومان لنفس الشيء لا يتبادلان بلا `as`. **التوصية: `ISODate`**
+> (الكود المبني والمختبَر)، و`type DateKey = ISODate` كاسم بديل مؤقت في وثيقتي 07 و09.
 
 > **تأكيد مستقل:** `src/lib/time.ts` المكتوب فعلاً في المستودع وصل إلى **القرار نفسه بالتبرير
 > نفسه** («ليبيا UTC+2 ثابت بلا توقيت صيفي… ويجب أن يرى نفس اليوم سواء فتح التطبيق من هاتفه
@@ -2758,9 +2811,29 @@ jobs:
 
 **القرار: مكوّنات مخططات مكتوبة في `ui/charts` بـ SVG، بلا Recharts/Chart.js/D3.**
 
+> **تصحيح الجرد (تدقيق معماري):** كان هذا الجدول يقول «ثلاثة أنواع مخططات فقط مطلوبة
+> (أعمدة، خط، **دائري**)». و`05-design-system.md` §11.1 — وهو **مالك** قرار الشكل —
+> يُسمّي ستة أشكال، و**يحصر الدونت بـ ≤4 فئات** ويمنع المؤشّر الدائري (gauge) صراحةً:
+>
+> | الشكل | الاستخدام (05 §11.1) |
+> |---|---|
+> | شريط أفقي مرتَّب | المصروفات حسب الفئة (8–12 فئة) — **والدونت مرفوض عند هذا العدد** |
+> | أشرطة مجمَّعة | الإيرادات مقابل المصروفات شهرياً |
+> | خط | اتجاهات الإنفاق (12 نقطة) |
+> | أشرطة بخط أساس صفري | التدفق النقدي (الموجب أعلى، السالب أسفل) |
+> | مساحة / خط تراكمي | رصيد حساب عبر الأشهر من `accountPeriods` |
+> | مقياس خطّي وشريط تقدّم | استهلاك الميزانية وتقدّم الهدف — **لا gauge** |
+> | خريطة حرارية | تقويم الإنفاق اليومي (سلّم أحادي) |
+> | دونت | **مسموح فقط عند ≤4 فئات** |
+>
+> **القرار نفسه لا يتغيّر** — بل يقوى: ثمانية أشكال مخصّصة بثلاثة محرَّمات بنيوية (لا محور
+> مزدوج، لا محور مقطوع، لا ثلاثي أبعاد) و«لا رسم بلا زر عرض كجدول» هي **بالضبط** ما لا
+> تعطيه مكتبة جاهزة بلا ترقيع. والمرجع لشكل كل رسم وألوانه هو `05-design-system.md` §11،
+> ودور هذه الوثيقة هو **مكان** الكود (`ui/charts`) وحدوده لا شكله.
+
 | السبب | التفصيل |
 |---|---|
-| **الحجم** | ثلاثة أنواع مخططات فقط مطلوبة (أعمدة، خط، دائري — §4). مكتبة كاملة = 40–120KB لثلاثة أشكال |
+| **الحجم** | ثمانية أشكال بسيطة مطلوبة (05 §11.1) وكلها خطوط ومستطيلات وشبكة. مكتبة كاملة = 40–120KB، وتأتي بأشكال لا نستخدمها وبمحرَّمات لا تفرضها |
 | **RTL** | مكتبات المخططات تفترض LTR؛ قلب المحاور والتسميات فيها عملية ترقيع مستمرة مع كل ترقية |
 | **الأرقام** | ق-3 يُلزم بأرقام لاتينية و`formatLYD`؛ المكتبات تُنسِّق داخلياً فتحتاج تجاوزاً في كل محور وتلميح |
 | **التحكّم** | التلميح والتركيز ولوحة المفاتيح (إتاحة §3) تحت سيطرتنا مباشرة |
@@ -2814,7 +2887,7 @@ jobs:
 
 | # | الثغرة | السيناريو الذي يفشل | الحالة بعد مقارنة `04-security.md` |
 |---|---|---|---|
-| **ق-1** | **لا `match` لمجموعات غير مالية مطلوبة:** `tasks` (§14)، `notes` (§13)، `worshipRecords`/`quranProgress`/`zakatRecords` (§15) — غائبة في النواة §14.3، والافتراضي `allow write: if false` | المفكرة والمهام والعبادات **غير قابلة للكتابة** ⇒ أربع وحدات لا تعمل | **✅ مُعالَجة في `04-security.md`:** يحتوي `match` لـ `notes`, `notebooks`, `tasks`, `taskLists`, `reminders`, `worshipRecords`, `quranProgress`, `zakatRecords`, `attachments`. **أرفع الملاحظة إلى النواة فقط:** §14.3 فيها ناقصة ويجب أن تُحيل إلى `04-security.md` كمرجع القواعد المعتمد، وإلا قرأها مطوّر لاحق كالقائمة الكاملة |
+| **ق-1** | **لا `match` لمجموعات غير مالية مطلوبة:** `tasks` (§14)، `notes` (§13)، `worshipRecords`/`quranProgress`/`zakatRecords` (§15) — غائبة في النواة §14.3، والافتراضي `allow write: if false` | المفكرة والمهام والعبادات **غير قابلة للكتابة** ⇒ أربع وحدات لا تعمل | **⚠️ مُعالَجة جزئياً فقط — صُحِّح الحكم في التدقيق المعماري.** `04-security.md` §6 يحتوي `match` لـ `notes`, `notebooks`, `tasks`, `taskLists`, `reminders`, `zakatRecords`, `attachments` — **لكن** (1) سمّى مجموعتي العبادات `worshipRecords`/`quranProgress` بينما الاسم المعتمد في `09-personal-worship.md` §5.1 و§6.2 هو `worshipDays`/`quranSessions`، و`03-data-model.md` §7 يسمّيهما `worshipRecords/{YYYY-MM}` **شهريتين** ⇒ تعارض ثلاثي؛ (2) ستة مسارات كانت بلا قاعدة: `habits`, `notes/{id}/content`, `budgetTemplates`, `scenarios`, `importBatches`, `fiscalPeriods`, وكذلك `recurrenceProposals`/`personalRecurrences` من 07؛ (3) قائمتا `settings` و`meta` المغلقتان كانتا تحجبان `settings/{personal,worship,recurrence}` و`meta/{scheduler,quran,backup}`؛ (4) اتحاد حالات المهمة كان بلا `'open'` ⇒ **كل** مهمة تُرفَض. **أُصلحت كلها في `04-security.md` §6 (ع-أمن-10…15)** وأُضيف `tests/rules/coverage.rules.test.ts` ليفرض التغطية آلياً. **والملاحظة على النواة تبقى:** §14.3 يجب أن تُحيل إلى `04-security.md` §6 كمرجع القواعد المعتمد، وإلا قرأها مطوّر لاحق كالقائمة الكاملة — **وهو ما حدث فعلاً: `firestore.rules` في المستودع هو §14.3 حرفياً** |
 | **ق-2** | **`periods/{pk}` تشترط وجود `householdExpenseMinor`** (`isNonNegMoney(...)` + `<= totalExpenseMinor`)، و§12.1 في النواة لا تكتب الحقل إلا للقيود الموسومة `household` | **أول مصروف غير منزلي في كل شهر يُرفَض** — أكثر العمليات شيوعاً | **⚠️ التقاء مؤكَّد، والحلّ في طبقتي:** `04-security.md` فصل `create` عن `update` (فأزال خطأ التقييم)، لكنه **ما زال يشترط حضور الحقل في `create`**. ⇒ **ADR-034 ليس تحسيناً بل شرط صحة:** مُشفِّر `periodDelta` في `data/ledger/writers` **يكتب دائماً مجموعة الحقول العددية كاملة** بـ `increment(0)` لغير المتأثر. **بدونه ترفض القواعد أول عملية في كل شهر** |
 | **ق-3** | ترتيب `||` في `accountPeriods` يُقيَّم خطأً عند الإنشاء (`resource.data` على مستند غير موجود) | أول حركة على أي (حساب، شهر) تُرفَض | **✅ مُعالَجة:** `04-security.md` فصل `allow create` عن `allow update` ⇒ لا وصول إلى `resource` في مسار الإنشاء |
 | **ق-4** | نفس العيب في `obligations` (`resource.data.keys()` على `create`) | إنشاء أي التزام يُرفَض | **✅ مُعالَجة** بنفس الفصل |
@@ -2942,3 +3015,21 @@ jobs:
 
 > **هذه الوثيقة تخدم النواة المحاسبية ولا تنافسها.** أي تعارض بينهما = عيب في هذه الوثيقة
 > يُصلَح لصالح النواة. وأي تغيير هنا يحتاج ADR جديداً.
+
+---
+
+> تعديل اتساق (تدقيق معماري): §2 أُضيف تحديث حالة — جدول «الواقع المفحوص» صار لقطة تاريخية:
+> 18 سكربتاً موجودة (كان «لا سكربت»)، و`domain/types/**` و`lib/{time,ulid,env}` و`data/firebase/**`
+> و`ui/styles/**` و`features/auth` مكتوبة، و144 اختباراً أخضر بتغطية 96.7%، و`firestore.rules`
+> و`firestore.indexes.json` مكتوبان **ولم يُنشرا**، و**Java غير مثبَّتة** فلم تُختبر قاعدة واحدة،
+> ومزوّد Google غير مُفعَّل في الكونسول. §4.4 قُيِّدت **B11** باستثناء مسار واحد
+> `src/data/scheduler/clock.ts` — وبدونه كان استقصاء ساعة الخادم (07 §2.5) **ممنوعاً بالقاعدة
+> ومستحيلاً تقنياً** مع `persistentLocalCache` (الكاش يُعيد `probeAt` المحلي ⇒ `skewMs ≈ 0`
+> ⇒ حارس صوري). §5.4 وُثِّق انحرافا `emulators.ts` و`auth/**` عن الكود وأُقِرّا، وثُبِّت أن
+> `src/infra/**` لا وجود له. §11.5 صُحِّحت تسميات ADR-033 إلى ما يُصدِّره `src/lib/time.ts` فعلاً
+> (`LIBYA_UTC_OFFSET_MINUTES`, `today`, `toLibyaISODate`, `nowISO`) ورُفع توحيد `ISODate`/`DateKey`.
+> §13.3 صُحِّح جرد المخططات من «ثلاثة أشكال، منها دائري» إلى ثمانية أشكال وفق `05-design-system.md`
+> §11.1 الذي **يحصر الدونت بـ ≤4 فئات ويمنع gauge** — والقرار (بلا مكتبة) لم يتغيّر بل قوي.
+> §14.2 صُحِّح حكم الثغرة **ق-1** من «✅ مُعالَجة» إلى «⚠️ جزئياً»: ستة مسارات كانت بلا قاعدة،
+> ومجموعتا العبادات مسمّاتان خطأً، وقائمتا `settings`/`meta` المغلقتان ناقصتان، واتحاد حالات
+> المهمة بلا `'open'` ⇒ كل مهمة تُرفَض. أُصلحت في `04-security.md` §6 (ع-أمن-10 … ع-أمن-15).
