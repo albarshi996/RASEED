@@ -1,0 +1,210 @@
+/*
+ * رموز التصميم — مولَّدة من وثيقة نظام التصميم (docs/design/05-design-system.md §2).
+ *
+ * اللون الأساسي «نيلي» عند زاوية OKLCH = 283°، أي 62° بعيدًا عن الأزرق المؤسسي المبتذل،
+ * و**خارج كل الزوايا المحجوزة للمعاني المالية** (الأحمر 28° مصروف، الكهرماني 49° تحذير،
+ * الأخضر 156° دخل، الفيروزي 177° مستحق لي). هذا ليس ذوقًا: لون هوية يقع قرب لون دلالي
+ * يجعل الزر الأساسي يُقرأ كشارة حالة.
+ *
+ * **قاعدة الاستخدام:** المكوّنات تستهلك الرموز الدلالية (--surface, --text, --fin-income…)
+ * لا درجات السلّم مباشرة. تبديل الوضع الداكن يعيد تعريف الدلالي فقط.
+ */
+
+@theme {
+  /* ── «نيلي» — الأساسي (h = 283°) ─────────────────────────────── */
+  --color-primary-50: #f5f5fd;
+  --color-primary-100: #ebeafa;
+  --color-primary-200: #d8d5f5;
+  --color-primary-300: #bab5ef;
+  --color-primary-400: #9997fd;
+  --color-primary-500: #7a72ed;
+  --color-primary-600: #5b4bc8;
+  --color-primary-700: #4839a5;
+  --color-primary-800: #372c81;
+  --color-primary-900: #282061;
+  --color-primary-950: #17113e;
+
+  /* ── الرمادي «رمادي نيلي» (h = 272°, C ≤ 0.026) ──────────────── */
+  --color-gray-25: #fafbfe;
+  --color-gray-50: #f5f6fb;
+  --color-gray-100: #eaedf3;
+  --color-gray-200: #dcdfe9;
+  --color-gray-300: #c6cad7;
+  --color-gray-400: #999eae;
+  --color-gray-500: #757a8a;
+  --color-gray-600: #5b6070;
+  --color-gray-700: #464a58;
+  --color-gray-800: #2f323e;
+  --color-gray-900: #1b1e28;
+  --color-gray-950: #0d0f17;
+
+  /* ── «شامبانيا» — أسطح دافئة فقط. لا نص، لا حالة، لا رسوم. ───── */
+  --color-champagne-50: #fcfaf5;
+  --color-champagne-100: #f7f2e7;
+  --color-champagne-200: #efe6d3;
+
+  /* ── الخطوط ──────────────────────────────────────────────────── */
+  --font-sans: 'IBM Plex Sans Arabic', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+
+  /* ── الحركة ──────────────────────────────────────────────────── */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   الرموز الدلالية — الوضع الفاتح
+   ══════════════════════════════════════════════════════════════════ */
+:root {
+  color-scheme: light;
+
+  --surface-page: var(--color-gray-50);
+  --surface-card: #ffffff;
+  --surface-warm: var(--color-champagne-50);
+  --surface-sunken: var(--color-gray-100);
+  --surface-hover: var(--color-gray-100);
+
+  --border-subtle: var(--color-gray-200);
+  --border-strong: var(--color-gray-300);
+
+  --text-primary: var(--color-gray-900);
+  --text-secondary: var(--color-gray-600);
+  --text-muted: var(--color-gray-500);
+  --text-on-accent: #ffffff;
+
+  --accent: var(--color-primary-600);
+  --accent-hover: var(--color-primary-700);
+  --accent-active: var(--color-primary-800);
+  --accent-subtle: var(--color-primary-50);
+  --focus-ring: var(--color-primary-700);
+
+  /* ── الألوان المالية الدلالية ──────────────────────────────────
+     كل زوج (نص على خلفيته) مُتحقَّق من تباينه وفق WCAG AA في الوثيقة. */
+  --fin-income: #0b6b43;
+  --fin-income-bg: #e7f5ee;
+  --fin-income-border: #a9dcc3;
+
+  --fin-expense: #a8201a;
+  --fin-expense-bg: #fdecea;
+  --fin-expense-border: #f5b8b3;
+
+  --fin-owed: #8a1f62;
+  --fin-owed-bg: #fbe9f3;
+  --fin-owed-border: #f2b6cf;
+
+  --fin-receivable: #0a6168;
+  --fin-receivable-bg: #e6f4f6;
+  --fin-receivable-border: #a6d9df;
+
+  --fin-transfer: #464a58;
+  --fin-transfer-bg: #eaedf3;
+  --fin-transfer-border: #c6cad7;
+
+  --shadow-color: 23 17 62;
+  --shadow-sm: 0 1px 2px rgb(var(--shadow-color) / 0.06);
+  --shadow-md: 0 4px 12px rgb(var(--shadow-color) / 0.08);
+  --shadow-lg: 0 12px 32px rgb(var(--shadow-color) / 0.12);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   الوضع الداكن.
+   الحارس `:root:not([data-theme='light'])` يسمح للمستخدم بتثبيت الفاتح
+   حتى لو كان نظامه داكنًا — تفضيل النظام افتراض لا إلزام.
+   ══════════════════════════════════════════════════════════════════ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --surface-page: var(--color-gray-950);
+    --surface-card: var(--color-gray-900);
+    --surface-warm: #16140f;
+    --surface-sunken: #11131b;
+    --surface-hover: var(--color-gray-800);
+
+    --border-subtle: var(--color-gray-800);
+    --border-strong: var(--color-gray-700);
+
+    --text-primary: var(--color-gray-50);
+    --text-secondary: var(--color-gray-300);
+    --text-muted: var(--color-gray-400);
+    --text-on-accent: #ffffff;
+
+    --accent: var(--color-primary-500);
+    --accent-hover: var(--color-primary-400);
+    --accent-active: var(--color-primary-600);
+    --accent-subtle: #1d1a3a;
+    --focus-ring: var(--color-primary-300);
+
+    --fin-income: #157a4d;
+    --fin-income-bg: #0d2219;
+    --fin-income-border: #1d4f36;
+
+    --fin-expense: #c9332a;
+    --fin-expense-bg: #2a1210;
+    --fin-expense-border: #5e221e;
+
+    --fin-owed: #a52e78;
+    --fin-owed-bg: #27101d;
+    --fin-owed-border: #55203e;
+
+    --fin-receivable: #0e7c86;
+    --fin-receivable-bg: #0a2124;
+    --fin-receivable-border: #164a50;
+
+    --fin-transfer: #5b6070;
+    --fin-transfer-bg: #1b1e28;
+    --fin-transfer-border: #2f323e;
+
+    --shadow-color: 0 0 0;
+    --shadow-sm: 0 1px 2px rgb(var(--shadow-color) / 0.4);
+    --shadow-md: 0 4px 12px rgb(var(--shadow-color) / 0.5);
+    --shadow-lg: 0 12px 32px rgb(var(--shadow-color) / 0.6);
+  }
+}
+
+/* تثبيت الوضع الداكن يدويًا من الإعدادات. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --surface-page: var(--color-gray-950);
+  --surface-card: var(--color-gray-900);
+  --surface-warm: #16140f;
+  --surface-sunken: #11131b;
+  --surface-hover: var(--color-gray-800);
+
+  --border-subtle: var(--color-gray-800);
+  --border-strong: var(--color-gray-700);
+
+  --text-primary: var(--color-gray-50);
+  --text-secondary: var(--color-gray-300);
+  --text-muted: var(--color-gray-400);
+
+  --accent: var(--color-primary-500);
+  --accent-hover: var(--color-primary-400);
+  --accent-active: var(--color-primary-600);
+  --accent-subtle: #1d1a3a;
+  --focus-ring: var(--color-primary-300);
+
+  --fin-income: #157a4d;
+  --fin-income-bg: #0d2219;
+  --fin-income-border: #1d4f36;
+
+  --fin-expense: #c9332a;
+  --fin-expense-bg: #2a1210;
+  --fin-expense-border: #5e221e;
+
+  --fin-owed: #a52e78;
+  --fin-owed-bg: #27101d;
+  --fin-owed-border: #55203e;
+
+  --fin-receivable: #0e7c86;
+  --fin-receivable-bg: #0a2124;
+  --fin-receivable-border: #164a50;
+
+  --fin-transfer: #5b6070;
+  --fin-transfer-bg: #1b1e28;
+  --fin-transfer-border: #2f323e;
+
+  --shadow-color: 0 0 0;
+  --shadow-sm: 0 1px 2px rgb(var(--shadow-color) / 0.4);
+  --shadow-md: 0 4px 12px rgb(var(--shadow-color) / 0.5);
+  --shadow-lg: 0 12px 32px rgb(var(--shadow-color) / 0.6);
+}

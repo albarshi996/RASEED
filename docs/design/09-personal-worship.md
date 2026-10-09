@@ -1764,7 +1764,7 @@ computeZakat(input):
 | `baseMinor = nisabMinor − 1` | `isDue === false` و `dueMinor === 0` |
 | `baseMinor = 20` | `dueMinor = 1` (0.5 → نصف-لأعلى) |
 | `baseMinor = 19` | `dueMinor = 0` (0.475) |
-| `12_500 mg` ذهب عيار 21، سعر `350000` | `pureEquivalent = (12500×21+12)/24 = 10_937 mg` ⇒ `value = (10937×350000+500)/1000 = 3_827_950` |
+| `12_500 mg` ذهب عيار 21، سعر `350000` | `pureEquivalent = (12500×21+12)/24 = 262_512/24 = 10_938 mg` ⇒ `value = (10938×350000+500)/1000 = 3_828_300_500/1000 = 3_828_300` (أي 3,828.300 د.ل — ويُراجَع ذهنياً: 10.938 غم × 350 د.ل ✓) |
 | حلي شخصي والسياسة `exempt` | يُستبعد من الوعاء **ويظهر في `warnings` بقيمته** ليراه المستخدم |
 
 ### 8.7 الحول — الحساب والعرض
@@ -1902,5 +1902,823 @@ payZakat:
 
 ---
 
-*(يتبع: 9 الإعدادات، 10 الشاشات ومصادرها، 11 قواعد الأمان، 12 الفهارس والتكلفة، 13 التنبيهات،
-14 الاختبارات، 15 الثوابت والقصور، 16 واجهة النطاق.)*
+## 9. الإعدادات الجديدة
+
+مستندان **جديدان** بجانب `settings/app` الذي تملكه النواة — **لا تُضاف حقول إلى `settings/app`**
+لأنه مستند ساخن تقرؤه كل شاشة، وحشو إعدادات الورد والأذكار فيه يُنزّلها مع كل فتح.
+وقواعد النواة تسمح أصلاً بـ `settings/{docId}` فلا تحتاج قاعدة جديدة (ومع ذلك نُحكمها في 11).
+
+```ts
+// users/{uid}/settings/personal
+export interface PersonalSettings {
+  id: 'personal';
+  ownerUid: string; schemaVersion: number;
+
+  weekStartsOn: 0 | 1 | 6;                 // افتراضي 6 (السبت)
+  showHijriEverywhere: boolean;            // افتراضي false — الهجري في العبادات والزكاة دائماً
+  hijriOffsetDays: -1 | 0 | 1;             // افتراضي 0 (2.2)
+
+  notes: {
+    defaultNotebookId: string | null;
+    sortBy: 'updatedAt' | 'createdAt' | 'title';
+    searchArchivedByDefault: boolean;      // افتراضي false
+    autosaveDebounceMs: number;            // افتراضي 2500، للتشخيص لا للتعديل الحر
+  };
+  tasks: {
+    defaultListId: string | null;
+    defaultPriority: 1 | 2 | 3;            // افتراضي 2
+    showCompletedInLists: boolean;         // افتراضي false
+    taskBackfillDays: number;              // افتراضي 7 (4.5)
+    taskBackfillMaxPerRun: number;         // افتراضي 30
+  };
+  trashRetentionReminderDays: number;      // افتراضي 30 — عتبة تذكير لا حذف آلي (3.9)
+  updatedAt: Timestamp;
+}
+
+// users/{uid}/settings/worship
+export interface WorshipSettings {
+  id: 'worship';
+  ownerUid: string; schemaVersion: number;
+
+  prayer: {
+    trackJamaah: boolean;                  // افتراضي true
+    /** null = المرحلة الأولى: لا مواقيت إطلاقاً (5.6) */
+    times: PrayerTimesConfig | null;
+    remindersEnabled: boolean;             // افتراضي **false** — القسم 13
+  };
+  quran: QuranGoal & {
+    lastPosition: QuranPosition | null;
+    defaultInputMode: 'pages' | 'surahAyah' | 'juz';   // افتراضي 'pages'
+  };
+  habits: { showArchived: boolean };
+
+  zakat: {
+    /** **بلا قيمة افتراضية: null حتى يختار المستخدم** (8.5) */
+    nisabBasis: NisabBasis | null;
+    purityPolicy: PurityPolicy | null;
+    personalJewelryPolicy: PersonalJewelryPolicy | null;
+    debtDeductionPolicy: DebtDeductionPolicy;          // افتراضي 'currentlyDue'
+    /** آخر سعرين أدخلهما المستخدم — **اقتراح للتعبئة فقط، لا قيمة معتمدة** */
+    lastGoldGramPriceMinor: number | null;
+    lastSilverGramPriceMinor: number | null;
+    lastPricedAt: DateKey | null;
+    charityCategoryId: string | null;      // الفئة المرتبطة بـ expense.charity
+    disclaimerVersion: number;
+  };
+  updatedAt: Timestamp;
+}
+```
+
+**قاعدة مُلزِمة:** أي حقل سياسة زكوية قيمته `null` ⇒ **شاشة الزكاة تمنع التأكيد** وتطلب الاختيار.
+`null` هنا ليست «غير مُهيَّأ» بل **«لم يختر المستخدم بعد، ولن نختار عنه»**.
+
+**التهيئة الأولى:** يُنشأ المستندان في نفس `writeBatch` التهيئة في النواة (3.3)، مع
+`notebooks` افتراضي واحد («عام»)، و`taskLists` افتراضي واحد («مهامي»)، والعادات المُهيَّأة السبع (7.1).
+**معرّفات حتمية** لها: `notebookIdOf('general')`, `taskListIdOf('mine')`,
+`habitIdOf(presetKey) = sha1('habit:'+presetKey).slice(0,20)` — فإعادة التهيئة **لا تُنشئ نسخاً ثانية**
+(نفس مبدأ النواة في 3.3).
+
+---
+
+## 10. الشاشات ومصادر بياناتها
+
+«لا شاشة دون تحديد مصدر بياناتها وآلية الحفظ والتحديث» — المتطلب 25 بند 5. الجدول **كامل**:
+
+| الشاشة | القراءة (استعلام محدَّد) | الكتابة | التحديث |
+|---|---|---|---|
+| قائمة الملاحظات | `notes where trashed==false && archived==false` + فلتر الدفتر، ترتيب `updatedAt desc`، صفحات 20 | — | `onSnapshot` على الصفحة الأولى + `react-query` للصفحات التالية |
+| المثبَّتة | استعلام ثانٍ `pinned==true` | `pinned`, `pinnedAt` | `onSnapshot` |
+| محرّر الملاحظة | `notes/{id}` + `notes/{id}/content/body` | `writeBatch` للمستندين (3.5) | `onSnapshot` على المستند الوصفي لكشف تعارض `contentVersion` |
+| بحث الملاحظات | 3 طبقات (3.6) | — | استعلام لحظي + مسح محلي |
+| الأرشيف / السلة | `archived==true` / `trashed==true` | تبديل الأعلام، حذف نهائي بـ `writeBatch` | `react-query` |
+| الدفاتر | `notebooks where status=='active' orderBy orderKey` | إنشاء/تعديل/أرشفة + `noteCount` بـ `increment` | `onSnapshot` |
+| مهام اليوم | `tasks where trashed==false && status in [todo,inProgress] && dueDate==today` | `status`, `completedAt` | `onSnapshot` |
+| المهام المتأخرة | `... && dueDate < today orderBy dueDate asc` (4.2) | " | `onSnapshot` |
+| كل المهام + فلاتر | جدول 4.6 | " | `react-query` بمفتاح الفلتر |
+| تقويم المهام | `dueDate >= from && <= to` لشهر واحد | منتقي تاريخ | `react-query` بمفتاح `['tasks','month',pk]` |
+| قوائم المهام | `taskLists where status=='active'` | إنشاء/ترتيب | `onSnapshot` |
+| تفاصيل مهمة | `tasks/{id}` + الروابط بمعرّفاتها | المهام الفرعية، الروابط | `onSnapshot` |
+| اليوم العبادي | `worshipDays/{today}` | `setDoc(merge)` (5.3، 7.2) | `onSnapshot` |
+| الصلاة — أسبوعي | `worshipDays` بالمعرّف في المدى (7 مستندات) | " | `react-query` |
+| الصلاة — شهري | `worshipDays` بالمدى (31 مستنداً) | " | `react-query` بمفتاح `['worship','month',pk]` |
+| مواقيت الصلاة (م2) | **لا قراءة من Firestore** — حساب محلي من `settings/worship` | — | يُعاد الحساب عند تغيّر اليوم أو التهيئة |
+| الورد القرآني — اليوم | `quranSessions where dateKey==today` | إنشاء/تعديل/حذف جلسة | `onSnapshot` |
+| الورد — شهري | `quranSessions where periodKey==pk` | " | `react-query` |
+| أسماء السور والصفحات | **ملفات ثابتة في الحزمة** (6.1) | — | غير متغيّرة؛ تتغيّر بإصدار جديد فقط |
+| الأذكار والأعمال | `habits where status=='active'` + `worshipDays/{today}` | `increment` / تعيين مطلق (7.2) | `onSnapshot` على المستندين |
+| الصيام | نفس `worshipDays/{today}` | `setDoc(merge)` | `onSnapshot` |
+| حاسبة الزكاة (مسودة) | `accounts` و`debts` و`obligations` (**مُحمَّلة أصلاً بـ `onSnapshot` في النواة ⇒ 0 قراءة إضافية**) + `settings/worship` | `zakatRecords/{id}` بـ `setDoc` | حساب محلي نقي، لا كتابة حتى يحفظ المستخدم |
+| سجل الاحتسابات | `zakatRecords orderBy assessedAt desc` | — | `react-query` |
+| تفاصيل احتساب | `zakatRecords/{id}` + `journalEntries where refs.zakatRecordId==id` | `payZakat` عبر `execute` | `onSnapshot` |
+| دفع الزكاة | نموذج يقرأ `accounts` السائلة من محدِّدات النواة | **`execute({type:'payZakat'})` حصراً** | يرتدّ عبر `onSnapshot` على القيد والمستند |
+| الزكاة في لوحة التحكم | `zakatRecords` (للتقدير) + `periods/{pk}` (للمدفوع) | — | `onSnapshot` |
+| إعدادات شخصية/عبادات | `settings/personal`، `settings/worship` | `setDoc(merge)` | `onSnapshot` |
+
+**لا شاشة تقرأ من مجموعة غير مذكورة أعلاه، ولا شاشة تكتب بغير الوسيلة المذكورة.**
+و**لا بيانات تجريبية في أي شاشة**: الشاشة الفارغة تعرض حالة «لا بيانات» بنصّ عربي وزر إضافة
+(المتطلب 25 بند 4) — لا أرقام وهمية ولا رسم بياني بقيم ثابتة.
+
+---
+
+## 11. قواعد الأمان — المسوّدة الكاملة للمجموعات الجديدة
+
+تُدمَج في `firestore.rules` **داخل** `match /users/{uid}` في مسوّدة النواة 14.3،
+وتستفيد من دوالها (`isOwner`, `isNonNegInt`, `isPosInt`, `touchedOnly`, `unchanged`,
+`rebuildNotRunning`, `periodNotLocked`).
+
+> **تحذير مستفاد من عيب الأسبقية (النواة 14.2):** كل تعبير مركَّب أدناه **مُقوَّس صريحاً**،
+> ولا يوجد `||` بين فرع يفحص الملكية وفرع لا يفحصها. **الشروط الأساسية مشتركة لا بديلة.**
+> والقواعد **لا تُنشر قبل اختبارها بالمحاكي والموافقة** (المتطلب 25 بند 10).
+
+```javascript
+      // ══════════════════ دوال مساعدة إضافية ══════════════════
+      function isDateKey(s) {
+        return s is string && s.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+      }
+      function isPeriodKey(s) {
+        return s is string && s.matches('^[0-9]{4}-[0-9]{2}$');
+      }
+      function ownedShapeOk(d) {
+        return d.ownerUid == uid
+            && d.schemaVersion is int && d.schemaVersion >= 1;
+      }
+
+      // ══════════════════ المفكرة ══════════════════
+      match /notes/{noteId} {
+        function noteShapeOk(d) {
+          return ownedShapeOk(d)
+            && d.title is string && d.title.size() <= 200
+            && d.titleNorm is string && d.titleNorm.size() <= 200
+            && d.excerpt is string && d.excerpt.size() <= 240
+            && d.searchTokens is list && d.searchTokens.size() <= 150
+            && d.tags is list && d.tags.size() <= 20
+            && d.links is list && d.links.size() <= 20
+            && d.linkedIds is list && d.linkedIds.size() <= 20
+            && d.pinned is bool && d.archived is bool && d.trashed is bool
+            && d.contentHash is string && d.contentHash.size() == 64
+            && d.contentVersion is int && d.contentVersion >= 1
+            && isNonNegInt(d.contentBytes) && d.contentBytes <= 200000
+            && d.plainTextLength is int && d.plainTextLength >= 0;
+        }
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && noteShapeOk(request.resource.data)
+                       && request.resource.data.contentVersion == 1;
+        allow update: if isOwner(uid) && noteShapeOk(request.resource.data)
+                       && unchanged('ownerUid') && unchanged('createdAt')
+                       // النسخة تتقدّم ولا ترتدّ ⇒ لا كتابة من جهاز بنسخة قديمة
+                       && request.resource.data.contentVersion >= resource.data.contentVersion;
+        allow delete: if isOwner(uid) && resource.data.trashed == true;   // من السلة فقط
+      }
+
+      match /notes/{noteId}/content/{docId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && docId == 'body'
+          && request.resource.data.ownerUid == uid
+          && request.resource.data.contentVersion is int
+          && request.resource.data.contentJson is map
+          && request.resource.data.contentJson.type == 'doc';
+        allow delete: if isOwner(uid);     // مع حذف الملاحظة نهائياً
+      }
+
+      match /notebooks/{id} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && ownedShapeOk(request.resource.data)
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.status in ['active','archived']
+          && request.resource.data.orderKey is string;
+        // منع اليتم: لا حذف لدفتر فيه ملاحظات (العدّاد تقريبي لكنه حارس كافٍ هنا)
+        allow delete: if isOwner(uid) && resource.data.noteCount == 0;
+      }
+
+      // ══════════════════ المهام ══════════════════
+      match /tasks/{taskId} {
+        function taskShapeOk(d) {
+          return ownedShapeOk(d)
+            && d.title is string && d.title.size() > 0 && d.title.size() <= 200
+            && d.status in ['todo','inProgress','done','cancelled']
+            && d.priority in [1,2,3]
+            && (d.dueDate == null || isDateKey(d.dueDate))
+            && (d.startDate == null || isDateKey(d.startDate))
+            && (d.dueTime == null || d.dueTime.matches('^[0-2][0-9]:[0-5][0-9]$'))
+            && (d.details == null || d.details.size() <= 2000)
+            && d.subtasks is list && d.subtasks.size() <= 50
+            && d.tags is list && d.tags.size() <= 10
+            && d.links is list && d.links.size() <= 20
+            && d.orderKey is string && d.orderKey.size() <= 32
+            && d.trashed is bool
+            // ← الثابت P4 مفروض من الخادم، في الاتجاهين
+            && ((d.status == 'done')
+                  ? (d.completedAt is timestamp && isDateKey(d.completedOn))
+                  : (d.completedAt == null && d.completedOn == null))
+            && ((d.status == 'cancelled') ? d.cancelledAt is timestamp : true);
+        }
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && taskShapeOk(request.resource.data);
+        allow update: if isOwner(uid) && taskShapeOk(request.resource.data)
+          && unchanged('ownerUid') && unchanged('createdAt')
+          // مهمة متكرّرة مُمادّة لا يُعاد توليدها فوق إنجاز المستخدم:
+          && !(resource.data.status == 'done'
+               && request.resource.data.status == 'done'
+               && request.resource.data.completedAt != resource.data.completedAt);
+        allow delete: if isOwner(uid) && resource.data.trashed == true;
+      }
+
+      match /taskLists/{id} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && ownedShapeOk(request.resource.data)
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.status in ['active','archived'];
+        allow delete: if isOwner(uid) && resource.data.openCount == 0;
+      }
+
+      // ══════════════════ العبادات — اليوم ══════════════════
+      match /worshipDays/{dateKey} {
+        function prayerOk(p) {
+          return p.state in ['unset','onTime','qada']
+              && p.jamaah is bool
+              && (p.note == null || p.note.size() <= 200);
+        }
+        function dayShapeOk(d) {
+          return d.ownerUid == uid
+            && d.schemaVersion is int && d.schemaVersion >= 1
+            && d.dateKey == dateKey                       // ← المعرّف هو التاريخ
+            && isDateKey(d.dateKey)
+            && isPeriodKey(d.periodKey)
+            && d.periodKey == d.dateKey[0:7]              // ← نفس قاعدة ADR-008
+            && d.prayers is map
+            && d.prayers.keys().hasOnly(['fajr','dhuhr','asr','maghrib','isha'])
+            && d.habits is map && d.habits.keys().size() <= 100
+            && (d.note == null || d.note.size() <= 500)
+            && (d.fasting == null
+                || (d.fasting.state in ['unset','fasted','notFasted']
+                    && (d.fasting.note == null || d.fasting.note.size() <= 300)));
+        }
+        allow read: if isOwner(uid);
+        // الكتابة واحدة: setDoc(merge) ⇒ create و update بنفس الشروط
+        allow create, update: if isOwner(uid) && dayShapeOk(request.resource.data);
+        allow delete: if false;                           // سجل شخصي لا يُحذف؛ يُفرَّغ بـ 'unset'
+      }
+```
+
+> **قصور مُعلَن في القواعد (لغة القواعد بلا حلقات — نفس قصور النواة 14.4):**
+> القاعدة تفرض أن مفاتيح `prayers` هي الخمسة بالضبط، لكنها **لا تستطيع المرور على قيمها**
+> للتحقق من `prayerOk` لكل صلاة، ولا على `habits` للتحقق من `value >= 0` لكل عادة.
+> الدالة `prayerOk` معرَّفة ومستخدَمة على **المفاتيح الخمسة صريحاً** في النسخة النهائية
+> (خمسة شروط مكتوبة يدوياً: `prayerOk(d.prayers.fajr) && prayerOk(d.prayers.dhuhr) && …`)
+> — وهذا ممكن هنا **لأن العدد ثابت خمسة**. أما `habits` فعدد مفاتيحها متغيّر ⇒
+> **لا يمكن فرض `value >= 0` من الخادم** لكل عادة. الحارس الفعلي: الواجهة + النطاق،
+> والفاحص في «سلامة البيانات» يرصد أي قيمة سالبة. **مُعلَن في القسم 15.**
+
+```javascript
+      match /habits/{id} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && ownedShapeOk(request.resource.data)
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.type in ['counter','boolean','quantity']
+          && isPosInt(request.resource.data.targetPerDay)
+          && request.resource.data.stepValues is list
+          && request.resource.data.stepValues.size() <= 4
+          && request.resource.data.daysOfWeek is list
+          && request.resource.data.daysOfWeek.size() <= 7
+          && request.resource.data.status in ['active','archived'];
+        allow delete: if isOwner(uid);
+      }
+
+      // ══════════════════ القرآن ══════════════════
+      match /quranSessions/{id} {
+        function posOk(p) {
+          return p.surah is int && p.surah >= 1 && p.surah <= 114
+              && p.ayah  is int && p.ayah  >= 1 && p.ayah  <= 286
+              && p.page  is int && p.page  >= 1 && p.page  <= 604;
+        }
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && ownedShapeOk(request.resource.data)
+          && isDateKey(request.resource.data.dateKey)
+          && request.resource.data.periodKey == request.resource.data.dateKey[0:7]
+          && request.resource.data.mode in ['reading','memorizing','reviewing','listening']
+          && posOk(request.resource.data.from) && posOk(request.resource.data.to)
+          && isPosInt(request.resource.data.ayahCount)
+          && request.resource.data.ayahCount <= 6236
+          && isPosInt(request.resource.data.pagesTouched)
+          && request.resource.data.pagesTouched <= 604
+          && (request.resource.data.minutes == null
+              || isNonNegInt(request.resource.data.minutes))
+          && (request.resource.data.note == null
+              || request.resource.data.note.size() <= 300)
+          && isPosInt(request.resource.data.dataVersion);
+        allow delete: if isOwner(uid);
+      }
+```
+
+> `ayah <= 286` هو الحدّ الأعلى الممكن (أطول سورة: البقرة). **الحدّ الدقيق لكل سورة
+> لا تستطيع القاعدة فرضه** (يحتاج جدول 114 مدخلاً ولا حلقات) ⇒ يُفرض في `validateRange`
+> بطبقة النطاق وبالاختبار. مُعلَن في 15.
+
+```javascript
+      // ══════════════════ الزكاة ══════════════════
+      match /zakatRecords/{id} {
+        function zakatShapeOk(d) {
+          return ownedShapeOk(d)
+            && isDateKey(d.hawlStartAt) && isDateKey(d.hawlEndAt)
+            && isDateKey(d.assessedAt) && isDateKey(d.pricedAt)
+            && d.hawlEndAt > d.hawlStartAt
+            && d.nisabBasis in ['gold','silver']
+            && isPosInt(d.goldGramPriceMinor) && isPosInt(d.silverGramPriceMinor)
+            && d.purityPolicy in ['pureEquivalent','grossWeight']
+            && d.personalJewelryPolicy in ['zakatable','exempt']
+            && d.debtDeductionPolicy in ['currentlyDue','allDebts']
+            && d.metalHoldings is list && d.metalHoldings.size() <= 50
+            && isNonNegInt(d.tradeGoodsMinor)
+            && isNonNegInt(d.manualAdditionsMinor)
+            && isNonNegInt(d.grossAssetsMinor)
+            && isNonNegInt(d.deductibleMinor)
+            && isNonNegInt(d.baseMinor)
+            && isNonNegInt(d.nisabMinor)
+            && isNonNegInt(d.dueMinor)
+            && isNonNegInt(d.paidMinor)
+            && isNonNegInt(d.remainingMinor)
+            && d.isDue is bool
+            && d.rateBps == 250                               // ← النسبة مفروضة من الخادم
+            && d.status in ['draft','confirmed','partiallyPaid','paid','cancelled']
+            && isPosInt(d.methodVersion)
+            // ← الثابت P12 مفروضاً من الخادم (نفس نمط I5/I6 في النواة)
+            && d.remainingMinor == d.dueMinor - d.paidMinor
+            // ← منع الدفع الزائد كثابت مستند
+            && d.paidMinor <= d.dueMinor
+            // ← لا استحقاق دون بلوغ النصاب، ولا مقدار بلا استحقاق
+            && (d.isDue == (d.baseMinor >= d.nisabMinor))
+            && (d.isDue ? true : d.dueMinor == 0)
+            && (d.notes == null || d.notes.size() <= 1000);
+        }
+        // الحقول المُجمَّدة بعد التأكيد — مرآة مباشرة لقاعدة «لقطة لا مرجع» في 8.3
+        function frozenAfterConfirm() {
+          return unchanged('hawlStartAt') && unchanged('hawlEndAt')
+              && unchanged('assessedAt')  && unchanged('pricedAt')
+              && unchanged('nisabBasis')
+              && unchanged('goldGramPriceMinor') && unchanged('silverGramPriceMinor')
+              && unchanged('purityPolicy') && unchanged('personalJewelryPolicy')
+              && unchanged('debtDeductionPolicy')
+              && unchanged('metalHoldings') && unchanged('tradeGoodsMinor')
+              && unchanged('manualAdditionsMinor')
+              && unchanged('receivables') && unchanged('deductions')
+              && unchanged('components')
+              && unchanged('grossAssetsMinor') && unchanged('deductibleMinor')
+              && unchanged('baseMinor') && unchanged('nisabMinor')
+              && unchanged('isDue') && unchanged('dueMinor')
+              && unchanged('rateBps') && unchanged('methodVersion')
+              && unchanged('hijriSnapshot') && unchanged('assumptionIds');
+        }
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && zakatShapeOk(request.resource.data)
+          && request.resource.data.status == 'draft'
+          && request.resource.data.paidMinor == 0
+          && request.resource.data.paymentCount == 0;
+        allow update: if isOwner(uid)
+          && zakatShapeOk(request.resource.data)
+          && unchanged('ownerUid') && unchanged('createdAt')
+          && rebuildNotRunning(uid)
+          && (
+               // (أ) تعديل حرّ ما دام مسوَّدة
+               (resource.data.status == 'draft'
+                && request.resource.data.status in ['draft','confirmed','cancelled']
+                && (request.resource.data.status != 'confirmed'
+                    || request.resource.data.disclaimerAcceptedAt is timestamp))
+               ||
+               // (ب) بعد التأكيد: المدخلات مُجمَّدة، ولا يتغيّر إلا أثر الدفع أو الإلغاء
+               (resource.data.status in ['confirmed','partiallyPaid']
+                && frozenAfterConfirm()
+                && request.resource.data.status in
+                     ['confirmed','partiallyPaid','paid','cancelled']
+                && (request.resource.data.status != 'cancelled'
+                    || (resource.data.paymentCount == 0
+                        && request.resource.data.cancelReason is string
+                        && request.resource.data.cancelReason.size() >= 5
+                        && request.resource.data.cancelReason.size() <= 500)))
+               ||
+               // (ج) 'paid' لا يُعدَّل إلا بعكس دفعة (تنقيص paidMinor) أو تصحيح وصفي
+               (resource.data.status == 'paid'
+                && frozenAfterConfirm()
+                && request.resource.data.status in ['paid','partiallyPaid','confirmed'])
+             );
+        // لا حذف إلا لمسوَّدة بلا دفعات — منع اليتم (قيد يشير إلى احتساب محذوف)
+        allow delete: if isOwner(uid)
+          && resource.data.status == 'draft'
+          && resource.data.paymentCount == 0;
+      }
+
+      // ══════════════════ الإعدادات الجديدة (إحكام فوق قاعدة النواة العامة) ══════════════════
+      match /settings/{docId} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid)
+          && (!(docId in ['personal','worship'])
+              || (request.resource.data.ownerUid == uid
+                  && (docId != 'personal'
+                      || (request.resource.data.weekStartsOn in [0,1,6]
+                          && request.resource.data.hijriOffsetDays in [-1,0,1]))));
+      }
+```
+
+**ملاحظة ترتيب:** هذه الكتلة الأخيرة **تستبدل** كتلة `match /settings/{docId}` في مسوّدة النواة 14.3
+(لا تُضاف بجانبها) — لأن تكرار نفس `match` على نفس المسار يُقيَّم بـ OR وقد يُلغي الإحكام.
+**هذا بالضبط نوع العيب الذي عالجته النواة في 14.2، ويُغطّى باختبار محاكي صريح.**
+
+**ما تفرضه هذه القواعد فعلاً، وما لا تستطيعه:**
+
+| تفرضه ✓ | لا تستطيعه ✗ |
+|---|---|
+| `P4`: `done ⟺ completedAt` في الاتجاهين | أن `searchTokens` فعلاً مشتقّة من المحتوى |
+| `P1`: `worshipDays.id == dateKey` و`periodKey == dateKey[0:7]` | `value >= 0` لكل عادة (لا حلقات) |
+| `P2`: مفاتيح الصلوات الخمس بالضبط + حالة كل صلاة | حدّ آيات كل سورة بدقّة (114 حدّاً) |
+| `P11/P12`: `remaining == due − paid`، `paid <= due`، `rateBps == 250`، `isDue == (base >= nisab)` | أن `baseMinor` فعلاً = الوعاء المحسوب من المدخلات |
+| تجميد مدخلات الاحتساب بعد التأكيد (`frozenAfterConfirm`) | أن `contentHash` يطابق الجسد فعلاً |
+| منع حذف احتساب له دفعات، ومنع حذف دفتر/قائمة غير فارغة | — |
+| منع ارتداد `contentVersion` | — |
+| `ق-2`: الإغلاق على UID المالك (من دالة النواة `isOwner`) | — |
+
+---
+
+## 12. الفهارس والتكلفة على Spark
+
+### 12.1 الفهارس المركَّبة المطلوبة
+
+تُضاف إلى `firestore.indexes.json` بجانب فهارس النواة 15.5:
+
+```
+notes:          trashed (==) + archived (==) + updatedAt DESC
+notes:          trashed (==) + archived (==) + searchTokens (array-contains) + updatedAt DESC
+notes:          trashed (==) + notebookId (==) + updatedAt DESC
+notes:          trashed (==) + pinned (==) + pinnedAt DESC
+notes:          trashed (==) + titleNorm ASC
+notes:          trashed (==) + tags (array-contains) + updatedAt DESC
+notes:          linkedIds (array-contains) + updatedAt DESC
+notes:          trashed (==) + trashedAt ASC                    ← شاشة السلة والتذكير
+
+tasks:          trashed (==) + status (in) + dueDate ASC         ← المتأخرة واليوم
+tasks:          trashed (==) + status (in) + priority ASC + orderKey ASC
+tasks:          trashed (==) + listId (==) + status (in) + orderKey ASC
+tasks:          trashed (==) + dueDate ASC                      ← مدى شهر التقويم
+tasks:          trashed (==) + status (==) + completedOn DESC    ← تقرير الإنجازات
+tasks:          trashed (==) + tags (array-contains) + dueDate ASC
+tasks:          linkedIds (array-contains) + dueDate ASC
+tasks:          recurrenceId (==) + occurrenceKey ASC            ← فحص المادّية
+tasks:          trashed (==) + reminderAt (==) + status (in)     ← مُشغِّل التنبيهات
+
+worshipDays:    periodKey (==) + dateKey ASC
+quranSessions:  dateKey (==) + createdAt DESC
+quranSessions:  periodKey (==) + dateKey ASC
+quranSessions:  mode (==) + dateKey DESC
+zakatRecords:   status (in) + assessedAt DESC
+zakatRecords:   status (in) + hawlEndAt ASC                      ← تنبيه اقتراب الحول
+habits:         status (==) + orderKey ASC
+notebooks:      status (==) + orderKey ASC
+taskLists:      status (==) + orderKey ASC
+```
+
+**فهرس مطلوب على النواة (موجود أصلاً في 15.5 ⇒ لا إضافة):**
+`journalEntries: refs.zakatRecordId (==) + bookedAtTs DESC` — يخدم «دفعات هذا الاحتساب»
+والتحقق المستقل من `paidMinor` (P13).
+
+**استثناءات الفهرسة الأحادية** (لتقليل تكلفة الكتابة وحجم الفهرس — نفس سياسة النواة):
+
+```
+إلغاء فهرسة:  notes.excerpt, notes.contentHash, notes.links,
+              notes/{id}/content/body.contentJson,
+              tasks.details, tasks.subtasks, tasks.links,
+              worshipDays.prayers, worshipDays.habits, worshipDays.hijriLabel,
+              zakatRecords.metalHoldings, zakatRecords.receivables,
+              zakatRecords.deductions, zakatRecords.components,
+              zakatRecords.hijriSnapshot, zakatRecords.notes
+```
+
+**لا تُلغى فهرسة `notes.searchTokens`** — هي أساس البحث، و150 مدخل فهرس لكل كتابة هو الثمن المقبول
+المحسوب في 3.6.
+
+### 12.2 ميزانية القراءة والكتابة اليومية
+
+حصص Spark: **20,000 كتابة/يوم، 50,000 قراءة/يوم، 1 GiB تخزين، 10 GiB صادر/شهر.**
+
+| السيناريو اليومي | الكتابات | القراءات |
+|---|---|---|
+| تسجيل الصلوات الخمس | 5 | — |
+| تسجيل 6 أذكار (مع نقرات متعددة للتسبيح ≈ 10 نقرات) | ≈ 15 | — |
+| الصيام + ملاحظة اليوم | 2 | — |
+| جلستا ورد قرآني | 2 | — |
+| 8 مهام (إنشاء/إكمال/ترتيب) | ≈ 14 | — |
+| جلسة كتابة ملاحظة 20 دقيقة | ≤ 240 (مستندان × ≤120 حفظاً، بحكم 3.5) | 2 |
+| احتساب زكاة كامل + دفعة | 3 + 8 | ≈ 5 (البقية من `onSnapshot` القائم) |
+| فتح لوحة التحكم 10 مرات | — | ≈ 30 (مع التخزين المؤقت) |
+| عرض شهري للعبادات مرتين | — | 31 (التخزين المؤقت يمنع التكرار) |
+| قائمة الملاحظات + 3 عمليات بحث | — | ≈ 20 + 120 |
+| قائمة المهام وتقويمها | — | ≈ 60 |
+| **الإجمالي ليوم كثيف** | **≈ 290** | **≈ 270** |
+
+**النتيجة: ≈ 1.5% من حصة الكتابة و 0.5% من حصة القراءة في يوم كثيف جداً.**
+المُهدِّد الوحيد ذو المعنى هو **الحفظ التلقائي للملاحظات**، ولهذا ضُبط بسقف مزدوج في 3.5،
+ويُراقَب بعدّاد تشخيصي محلي: إن تجاوزت كتابات الملاحظات 1,000 في يوم، يظهر تحذير في
+«الإعدادات ← سلامة البيانات» — **اكتشاف لا مفاجأة بتوقّف الخدمة**.
+
+**التخزين:** 2,000 ملاحظة بمتوسط 8 KB ≈ 16 MB؛ 5 سنوات من `worshipDays` ≈ 1,825 مستنداً × 2 KB
+≈ 4 MB؛ `quranSessions` 5 سنوات ≈ 3,000 × 0.6 KB ≈ 2 MB. **المجموع ≈ 25 MB من 1 GiB.**
+لا ضغط يُذكر على التخزين.
+
+### 12.3 العمل دون اتصال والتخزين المحلي
+
+| البند | القرار |
+|---|---|
+| الذاكرة المحلية | `persistentLocalCache` مع `persistentMultipleTabManager` |
+| ما يعمل دون اتصال **كتابةً** | **كل** المفكرة والمهام والعبادات والقرآن والأذكار واحتساب الزكاة (مسودة) — لأنها `setDoc/updateDoc/writeBatch` |
+| ما **لا** يعمل دون اتصال | **دفع الزكاة** — عملية مالية بـ `runTransaction` ⇒ تمرّ بـ `pendingCommands` (ADR-007) وتُعرض «بانتظار المزامنة»، و**لا تُحتسب في `paidMinor` ولا في أي تقرير حتى تُرحَّل** |
+| الوسم البصري | كل ما كُتب محلياً ولم يُؤكَّد خادمياً يحمل مؤشّر «لم تتم المزامنة» من `snapshot.metadata.hasPendingWrites` |
+| التصدير | مستندات هذه الوحدات **مشمولة في `exportAllJson`** (ق-1: التصدير اليدوي هو النسخة الاحتياطية الوحيدة). ويشمل جسد كل ملاحظة ونصّها المجرَّد |
+
+---
+
+## 13. التنبيهات والتذكيرات
+
+**القيد الحاكم (ق-1):** لا `Cloud Functions` ولا `Scheduled Functions` ولا FCM Push.
+⇒ **لا إشعار يصل والتطبيق مغلق، ولا نَعِد المستخدم بذلك.** المتاح:
+تنبيهات داخل التطبيق دائماً + `Web Notifications API` عند منح الإذن **والتطبيق مفتوح**.
+
+### 13.1 المُشغِّل والمعرّفات الحتمية
+
+> **ADR-PW-22 — كل تنبيه يُولِّده مُشغِّل فتح التطبيق له **معرّف مستند حتمي**
+> `{type}:{entityId}:{bucketKey}`.**
+
+```ts
+// domain/notify/ids.ts  — نقي
+export type PersonalNotificationType =
+  | 'taskDueToday' | 'taskOverdue' | 'taskReminder'
+  | 'zakatHawlApproaching' | 'zakatHawlDue' | 'zakatUnpaid'
+  | 'zakatPriceStale' | 'notesTrashCleanup' | 'missedRecurringTasks';
+
+/** مثال: 'taskOverdue:7f3a…:2026-10-09'  |  'zakatHawlDue:rec_12:1447' */
+export function notificationId(
+  type: PersonalNotificationType, entityId: string, bucketKey: string
+): string;
+```
+
+**هذا هو الحارس كله.** التطبيق يُفتح 50 مرة في اليوم ⇒ المُشغِّل يحاول الكتابة 50 مرة على **نفس
+المعرّف** بنفس الحمولة ⇒ **تنبيه واحد**، بلا قفل ولا `lastRunAt` موثوق. وهو نقل مباشر لمبدأ
+`entryId === opId` من النواة (6.1) إلى التنبيهات، ويحقّق المتطلب 17 («منع التنبيهات المكررة»)
+**بنيوياً لا بمنطق تطبيقي**.
+
+| النوع | `bucketKey` | التكرار الناتج |
+|---|---|---|
+| `taskDueToday` | `dateKey` اليوم | مرة واحدة في اليوم لكل مهمة |
+| `taskOverdue` | `dateKey` اليوم | مرة واحدة في اليوم، لا في كل فتح |
+| `taskReminder` | `dateKey` + ساعة التذكير | مرة واحدة |
+| `zakatHawlApproaching` | `'approach'` + سنة الحول الهجرية | مرة واحدة لكل حول |
+| `zakatHawlDue` | سنة الحول الهجرية | مرة واحدة لكل حول |
+| `zakatUnpaid` | `periodKey` | مرة واحدة في الشهر، لا تذكير يومي |
+| `zakatPriceStale` | `periodKey` | مرة في الشهر |
+| `notesTrashCleanup` | `periodKey` | مرة في الشهر |
+
+**السقف:** `taskOverdue` يُولَّد لأقدم **10** مهام متأخرة فقط، ويُجمَع الباقي في تنبيه واحد
+«ولديك {n} مهمة متأخرة أخرى». وإلا كتب المُشغِّل 40 مستنداً في فتحة واحدة.
+
+**الحقول:** تُكتب في `notifications` (مجموعة النواة، قواعدها في 14.3 جاهزة: `create` للمالك،
+`update` على `read`/`readAt` فقط، و`delete` مسموح لأنها ليست سجلاً محاسبياً).
+كل تنبيه يحمل `level: 'info' | 'warning' | 'critical'`، و`link: { route, params }` للسجل المرتبط
+(المتطلب 17)، و`read: false`.
+
+### 13.2 تذكيرات العبادات — حساسية مقصودة
+
+| القرار | التفصيل |
+|---|---|
+| **معطَّلة افتراضياً** | `settings/worship.prayer.remindersEnabled = false`. تُفعَّل بإجراء صريح |
+| **لا تذكير بأي صلاة بعينها في الإصدار الأول** | لأن المواقيت غير موجودة (5.6)، فأي تذكير سيكون بوقت مخترع |
+| المتاح عند التفعيل | تذكير واحد اختياري بوقت يختاره المستخدم: «سجّل صلواتك اليوم» — **تذكير بالتسجيل لا بالعبادة** |
+| **النصوص المُحرَّمة** | «فاتتك صلاة…»، «لم تصلِّ…»، «التزامك هذا الشهر 60%»، أي صيغة لوم أو تقييم |
+| النص المعتمد | «تذكير لطيف: يمكنك تسجيل صلوات اليوم.» — قابل للإيقاف بضغطة من الإشعار نفسه |
+| القرآن والأذكار | تذكير واحد اختياري بوقت يختاره المستخدم، بنفس القيود |
+| **الصدق** | عند تفعيل أي تذكير، يُعرض مرة: «تصل التذكيرات والتطبيق مفتوح على هذا الجهاز. الإشعار والتطبيق مغلق يتطلب ترقية الخطة.» — **ق-1: لا وعد كاذب** |
+
+→ **openQuestion**: هل يريد المالك هذه التذكيرات موجودة أصلاً، وبأي صياغة؟
+
+---
+
+## 14. الاختبارات الإلزامية
+
+| # | الاختبار | المتوقع |
+|---|---|---|
+| **التطبيع والبحث** | | |
+| T1 | جدول 2.3 كاملاً (12 حالة) على `normalizeArabic` | المخرَج المذكور حرفياً |
+| T2 | `normalizeArabic` خاصيّة idempotent على 10,000 نص عشوائي (fast-check) | `f(f(x)) === f(x)` — **الثابت P7** |
+| T3 | `buildSearchTokens` لا يتجاوز 150 رمزاً مهما طال النص | ✓، ورموز العنوان موجودة كلها |
+| T4 | «إيجار» / «ايجار» / «الإيجار» / «الايجار» | كلها تطابق نفس الرمز `ايجار` |
+| T5 | استعلام AND في العميل: بحث «إيجار أكتوبر» لا يُرجع ملاحظة فيها «إيجار» وحدها | ✓ |
+| T6 | لا استيراد لـ `domain/text/arabic` في `domain/worship/quran*` ولا في مكوّنات عرض القرآن | **خطأ بناء** عند الخرق — الثابت P8 |
+| **المفكرة** | | |
+| T7 | `extractPlainText` على مستند بعناوين وقوائم ومهام ورابط | نص مفصول بأسطر بلا وسوم |
+| T8 | `validateNoteBody` على مستند 201 KB | `TOO_LARGE` |
+| T9 | `contentVersion` متأخر ⇒ محاولة كتابة | **القاعدة ترفض** (محاكي) — الثابت P6 |
+| T10 | حذف دفتر فيه ملاحظات | **القاعدة ترفض** |
+| T11 | حذف ملاحظة غير موجودة في السلة | **القاعدة ترفض** |
+| **المهام** | | |
+| T12 | `status:'done'` و`completedAt:null` | **القاعدة ترفض** — الثابت P4 |
+| T13 | `status:'todo'` و`completedAt` غير فارغ | **القاعدة ترفض** |
+| T14 | `isOverdue` و`bucketOf` على 12 حالة حدّية (بلا موعد، اليوم، أمس، ملغاة، مكتملة متأخرة) | التصنيف الصحيح، و**مهمة مكتملة ليست متأخرة أبداً** |
+| T15 | إكمال كل المهام الفرعية | `status` **لا يتغيّر** |
+| T16 | تشغيل استدراك المهام 50 مرة في نفس اليوم | **مهمة واحدة** لكل دورة (معرّف حتمي) |
+| T17 | استدراك بعد غياب 60 يوماً لقالب يومي | ≤ 7 مهام مُولَّدة + قائمة «مواعيد فائتة» للبقية |
+| T18 | إعادة توليد دورة أكملها المستخدم | **القاعدة ترفض** تغيير `completedAt` |
+| T19 | `between()` على 10,000 إدراج بينيّ متتالٍ | الترتيب اللفظي محفوظ دائماً |
+| **العبادات** | | |
+| T20 | `worshipDays` بمعرّف `2026-10-09` و`dateKey: '2026-10-08'` | **القاعدة ترفض** — الثابت P1 |
+| T21 | `periodKey: '2026-09'` مع `dateKey: '2026-10-09'` | **القاعدة ترفض** |
+| T22 | `prayers` بأربعة مفاتيح أو بستة | **القاعدة ترفض** — الثابت P2 |
+| T23 | `state: 'missed'` أو أي قيمة خارج الثلاث | **القاعدة ترفض** — الثابت P3 |
+| T24 | جهازان: أحدهما يسجّل الفجر والآخر العصر دون اتصال ثم يتزامنان | **كلاهما محفوظ** (دمج على مستوى الحقل) |
+| T25 | `increment(33)` من جهازين دون اتصال | القيمة **66** — ADR-PW-19 |
+| T26 | `habits.value` سالبة | **القاعدة ترفض** (`value >= 0` على المستوى المفروض) + رصد الفاحص |
+| T27 | لا يوجد أي حقل ينتهي بـ `Minor` في مخطط `notes/tasks/worshipDays/habits` | ✓ — الثابت P20 |
+| **القرآن** | | |
+| T28 | فحوص استيراد 6.1 كاملة | `Σ ayahCount === 6236`، 604 صفحة، تزايد صارم — الثابت P10 |
+| T29 | `absoluteAyahIndex` ذهاب وعودة على كل الآيات 1..6236 | تطابق تام |
+| T30 | `pageOfAyah` لأول وآخر آية في كل صفحة من 604 | الصفحة الصحيحة |
+| T31 | `validateRange` بـ `to` قبل `from` | `TO_BEFORE_FROM` |
+| T32 | `validateRange` بآية 300 في الفاتحة | `AYAH_OUT_OF_RANGE` |
+| T33 | `ayahCount` المخزَّن = الفرق + 1 على 500 مدى عشوائي | ✓ — الثابت P9 |
+| T34 | `nextAyah(114:6)` | `null` |
+| **الهجري** | | |
+| T35 | `hijriFromDateKey` ثم `dateKeyFromHijri` لكل يوم في 1440–1460 هـ | تطابق تام (ذهاب وعودة) |
+| T36 | `addHijriYear` على 30 من شهر ينتهي بـ 29 في السنة التالية | يُقصَر إلى 29 |
+| T37 | `planHawl` | `daysTotal` بين 353 و 356 — **ليس 365** |
+| T38 | `hijriOffsetDays = -1` ثم `+1` | الفرق يوم واحد في كل التحويلات، و**لا مستند مخزَّن يتغيّر** |
+| **الزكاة** | | |
+| T39 | كل أسطر جدول 8.6 الذهبي | القيم المذكورة بالدرهم بالضبط |
+| T40 | `baseMinor === nisabMinor` | `isDue === true` |
+| T41 | `baseMinor === nisabMinor − 1` | `isDue === false` و `dueMinor === 0` |
+| T42 | `mulRate` في مسار الزكاة مقابل مرجع `BigInt` مستقل على 10,000 قيمة | تطابق تام |
+| T43 | `metalValueMinor` و`pureEquivalentMilligrams` بأنصاف الوحدات | نصف-لأعلى بالضبط |
+| T44 | حلي شخصي وسياسة `exempt` | مُستبعَد من الوعاء، **وظاهر في `warnings` بقيمته** |
+| T45 | دين مرجوّ `include:false` | **لا يدخل** الوعاء |
+| T46 | التزام مستقبلي وسياسة `currentlyDue` | **لا يُخصَم** + `warnings` |
+| T47 | عدم ازدواج: مستحق لي لا يدخل من `cash` و`receivables` معاً | ✓ — الثابت P19 |
+| T48 | `remainingMinor != dueMinor − paidMinor` | **القاعدة ترفض** — الثابت P12 |
+| T49 | `paidMinor > dueMinor` | **القاعدة ترفض** |
+| T50 | `rateBps != 250` | **القاعدة ترفض** |
+| T51 | تعديل `goldGramPriceMinor` بعد `confirmed` | **القاعدة ترفض** (`frozenAfterConfirm`) |
+| T52 | تعديل `baseMinor` بعد `confirmed` | **القاعدة ترفض** |
+| T53 | حذف احتساب `confirmed` | **القاعدة ترفض** |
+| T54 | حذف احتساب `draft` بدفعة واحدة | **القاعدة ترفض** |
+| T55 | `payZakat` بمبلغ > `remainingMinor` | `OVERPAYMENT` برسالة عربية تذكر المتبقي |
+| T56 | `payZakat` على احتساب `draft` | `ZAKAT_NOT_CONFIRMED` |
+| T57 | `payZakat` ثم قراءة الدفتر | قيد واحد، `amountMinor == المبلغ`، `expense.charity` مدين، الحساب دائن |
+| T58 | `payZakat` ثم التحقق المستقل | `Σ` قيود `refs.zakatRecordId` **===** `paidMinor` — الثابت P13 |
+| T59 | **عكس دفعة زكاة** | `paidMinor` يرتدّ و`status` يُعاد حسابه — **يفشل حتى حسم ثغرة `voidTransaction` في `openQuestions`** |
+| T60 | `payZakat` مرتين بنفس `opId` ونفس الحمولة | `alreadyApplied: true`، **صفر كتابات**، و`paidMinor` لم يتغيّر |
+| T61 | إلغاء احتساب له دفعات | `ZAKAT_HAS_PAYMENTS` |
+| T62 | سياسة زكوية `null` | **الواجهة تمنع التأكيد** ورسالة اختيار صريحة |
+| **التنبيهات** | | |
+| T63 | تشغيل مُشغِّل التنبيهات 50 مرة في اليوم | **تنبيه واحد لكل (نوع، كيان، يوم)** — الثابت P17 |
+| T64 | 40 مهمة متأخرة | ≤ 10 تنبيهات فردية + تنبيه مُجمَّع |
+| **عام** | | |
+| T65 | RTL: لقطة شاشة لكل شاشة من القسم 10 على 375px و1280px | لا تمرير أفقي، لا أيقونة اتجاهية مقلوبة، كل الأرقام لاتينية (ق-3) |
+| T66 | `exportAllJson` | يحوي كل مجموعات هذه الوثيقة، وأجساد الملاحظات، ونصوصها المجرَّدة |
+| T67 | عزل المستخدم: UID آخر يحاول قراءة/كتابة أي مجموعة هنا | **مرفوض بالقواعد** (ق-2) — لكل مجموعة على حدة |
+
+**أدوات:** `vitest` للوحدات، `fast-check` للخاصيّات (T2، T19، T29، T33، T42)،
+`@firebase/rules-unit-testing` لكل سطر «القاعدة ترفض»، `@testing-library/react` للسلوك،
+وفحص الحزمة في CI لسقف حجم المحرّر (3.3).
+
+---
+
+## 15. الثوابت والقصور
+
+### 15.1 الثوابت P1…P20 — جُمل قابلة للاختبار
+
+| # | الثابت | المفروض من |
+|---|---|---|
+| **P1** | `worshipDays` و`quranSessions`: `periodKey === dateKey[0:7]`، ومعرّف مستند اليوم === `dateKey` | **الخادم** |
+| **P2** | `prayers` تحوي الخمسة بالضبط، وكل `state ∈ {unset, onTime, qada}`، و`jamaah` بولياني | **الخادم** |
+| **P3** | لا تُخزَّن حالة «فائتة/متروكة» لصلاة ولا لعادة ولا ليوم. الغياب = «لم تُسجَّل» | الخادم (قائمة القيم) + مراجعة نصوص |
+| **P4** | `task.status === 'done'` ⟺ `completedAt != null && completedOn != null` | **الخادم** |
+| **P5** | `'overdue'` و`'today'` **لا تُخزَّن أبداً** في أي حقل | الخادم (قائمة القيم) |
+| **P6** | `notes.contentVersion === notes/{id}/content/body.contentVersion`، ولا ارتداد للنسخة | الخادم (منع الارتداد) + فحص عميل |
+| **P7** | `normalizeArabic` idempotent، و`searchTokens.length ≤ 150` | الخادم (السقف) + T2 |
+| **P8** | `normalizeArabic` **لا تُطبَّق** على نص قرآني معروض | **أداة البناء** (boundaries) |
+| **P9** | `ayahCount === idx(to) − idx(from) + 1 ≥ 1` و`pagesTouched ≥ 1` | النطاق + T33 |
+| **P10** | `Σ surah.ayahCount === 6236`، `pages.length === 604`، حدود الصفحات متزايدة صارماً، وبصمة الملف مطابقة | **سكربت الاستيراد (يفشل البناء)** |
+| **P11** | `zakat.dueMinor === mulRate(baseMinor, 250)` عند `isDue`، و`0` عند عدمه | الخادم (`dueMinor == 0` عند `!isDue`) + T39 |
+| **P12** | `zakat.remainingMinor === dueMinor − paidMinor` و`paidMinor <= dueMinor` و`rateBps === 250` و`isDue === (base >= nisab)` | **الخادم** |
+| **P13** | `zakat.paidMinor === Σ amountMinor` لقيود `refs.zakatRecordId == id` بحالة `posted` | تجميع خادمي عند الطلب |
+| **P14** | مدخلات احتساب `confirmed` **مُجمَّدة**: لا تتغيّر بتغيّر رصيد ولا سعر ولا سياسة ولا إزاحة هجرية | **الخادم** (`frozenAfterConfirm`) |
+| **P15** | لا قيد محاسبي يشير إلى احتساب في `draft`، ولا احتساب محذوف له قيد | الخادم (شرط الحذف) + حارس النطاق |
+| **P16** | العدّادات تُكتب بـ `increment` فقط؛ التعيين المطلق مسار واحد صريح | مراجعة + قاعدة ESLint على `data/worship` |
+| **P17** | كل تنبيه يُولِّده المُشغِّل له معرّف حتمي ⇒ لا تنبيه مكرَّر | بنيوي (مفتاح المستند) |
+| **P18** | لا تاريخ هجري مخزَّن كحقيقة. المخزَّن ميلادي، والهجري مشتقّ أو لقطة عرض مُسمَّاة `*Label`/`*Snapshot` | مراجعة مخطط + T38 |
+| **P19** | لا يدخل مبلغ واحد في الوعاء الزكوي من مسارين | النواة (I22: `isCashLike=false` للمستحقات) + T47 |
+| **P20** | لا حقل مبلغ مالي (`*Minor`) في `notes`/`tasks`/`worshipDays`/`habits`/`quranSessions`. الصدقة تُسجَّل في الدفتر مرة واحدة | اختبار مخطط T27 |
+
+### 15.2 القصور المُعلَن صراحةً
+
+| # | القصور | الأثر الحقيقي | لماذا نقبله الآن |
+|---|---|---|---|
+| 1 | **لا بحث نصّي كامل** | لا بحث بعبارة، ولا ببادئة داخل جسد الملاحظة، ولا مطابقة جمع تكسير («مصاريف» لا تجدها بـ «مصروف») | Firestore لا يدعمه، والبدائل تعني خدمة خارجية ومفتاحاً في الواجهة (خرق ق-1 والقسم 20). والطبقات الثلاث تغطّي الاستخدام الواقعي |
+| 2 | **كلمات بعد ≈ 1200 كلمة في ملاحظة طويلة غير مفهرسة** | قد لا تظهر الملاحظة في بحث عام | سقف 150 رمزاً مقصود ومقيس؛ والبحث داخل الملاحظة المفتوحة كامل |
+| 3 | **لا دمج تحريري بين جهازين** | تعديل متوازٍ لنفس الملاحظة ⇒ الجهاز المتأخر يُرفض ويختار (3.1) | CRDT يضاعف الحجم والتعقيد لمستخدم واحد. والرفض الصريح أصدق من دمج صامت يُتلف نصاً |
+| 4 | **عدّاد يتضاعف نظرياً عند إعادة محاولة شبكية** | عدّاد تسبيح أعلى بـ 33 | عدّاد ليس سجلاً محاسبياً، والتصحيح بضغطة. والقيمة المطلقة تخسر عمل الجهاز الآخر — وهو ضرر أكبر |
+| 5 | **القواعد لا تفرض `value >= 0` لكل عادة** | قيمة عادة سالبة ممكنة نظرياً من عميل معطوب | لغة القواعد بلا حلقات (نفس قصور النواة 14.4). الحارس: النطاق + الواجهة + فاحص «سلامة البيانات» |
+| 6 | **القواعد لا تفرض حدّ آيات كل سورة بدقّة** | جلسة بآية 200 في سورة من 50 آية ممكنة من عميل معطوب | يحتاج جدول 114 مدخلاً في القواعد. الحارس: `validateRange` + T32 |
+| 7 | **القواعد لا تتحقّق أن `baseMinor` فعلاً = الوعاء المحسوب** | عميل معطوب يكتب وعاءً غير مطابق لمدخلاته | يحتاج تنفيذ كل الخوارزمية في لغة القواعد. المفروض خادمياً: العلاقات بين `base`/`nisab`/`due`/`paid`/`remaining` — وهي **الأهم** |
+| 8 | **لا إشعار يصل والتطبيق مغلق** | تذكير مهمة لا يصل ليلاً | **ق-1**، ومُعلَن للمستخدم نصّاً عند تفعيل أي تذكير |
+| 9 | **لا مواقيت صلاة في المرحلة الأولى** | المستخدم يسجّل بلا مرجع وقت | المتطلب 15 يمنع الأوقات التقديرية غير الموثوقة. التصميم جاهز (5.6) |
+| 10 | **التسمية الهجرية قد تختلف بين جهازين** | نصّ معروض يختلف يوماً | بيانات ICU تختلف بالإصدار. **لا بيانات تتلف** لأن المخزَّن ميلادي (P18) |
+| 11 | **لا تتبّع لتقلّب الرصيد خلال الحول** | من هبط ماله تحت النصاب في منتصف الحول ثم عاد، نحسب له على الطرفين (`Z-HAWL-2`) | مذهب الجمهور يتسامح، والتتبّع اليومي يحتاج لقطة رصيد يومية. **مُعلَن في الواجهة** |
+| 12 | **تصنيف «في وقتها» بيد المستخدم لا بالساعة** | من يسجّل متأخراً قد يخطئ التصنيف | وقت التسجيل ≠ وقت الصلاة، والاستنتاج الآلي سيكون خاطئاً وجارحاً (مبدأ القسم 5) |
+| 13 | **لا حذف تلقائي للسلة** | تراكم محذوفات يستهلك تخزيناً | لا مُشغِّل مجدول (ق-1)، **ولا نحذف بيانات بلا إجراء** مع كون التصدير اليدوي هو النسخة الوحيدة |
+| 14 | **عدّادات `noteCount`/`openCount` تقريبية** | رقم أعلى/أدنى بواحد | ليست محمية بثابت توازن. زر «أعد العدّ» بقراءة واحدة. **مسموح هنا ومُحرَّم في المال** |
+| 15 | **عكس دفعة زكاة لا يرتدّ على `paidMinor` حتى حسم ثغرة النواة** | `remainingMinor` خاطئ ⇒ المستخدم يظن أنه أدّى ما لم يؤدِّ | **أخطر بند في القائمة.** مرفوع في `openQuestions` ومطلوب حسمه **قبل** تنفيذ شاشة الزكاة. والتخفيف المؤقت: تعطيل زر «ألغِ الدفعة» في شاشة الزكاة حتى الحسم |
+
+---
+
+## 16. سطح واجهة النطاق
+
+```ts
+// domain/personal/api.ts — ما تناديه الواجهة في هذه الوحدات، ولا شيء غيره
+// ملاحظة: كل ما يمسّ المال يمرّ عبر domain/api.ts في النواة (execute) لا من هنا.
+
+// ── المفكرة ──
+export const notes = {
+  create, updateMeta, saveBody,          // saveBody ⇒ writeBatch للمستندين
+  pin, unpin, archive, unarchive, trash, restore, purge,
+  moveToNotebook, addLink, removeLink,
+  search,                                 // الطبقات الثلاث (3.6)
+  findInNote,                             // بحث محلي داخل النص المفتوح
+};
+export const notebooks = { create, rename, archive, reorder, remove, recount };
+
+// ── المهام ──
+export const tasks = {
+  create, update, complete, reopen, cancel, trash, restore, purge,
+  reorder, addSubtask, toggleSubtask, removeSubtask,
+  addLink, removeLink,
+  listByBucket, listMonth,                // قراءات مُحدَّدة (4.6، 4.7)
+  runTaskCatchUp,                         // استدراك المهام المتكرّرة (4.5)
+};
+
+// ── العبادات ──
+export const worship = {
+  setPrayer,                              // (dateKey, PrayerKey, state, jamaah)
+  clearPrayer,
+  setFasting,
+  bumpHabit,                              // increment بخطوة
+  setHabitValue,                          // تعيين مطلق — إجراء تصحيح صريح
+  setDayNote,
+  getDay, getWeek, getMonth,              // قراءات مُحدَّدة
+  computePrayerTimes,                     // المرحلة الثانية — نقي، بلا I/O
+};
+export const habits = { create, update, archive, reorder, remove };
+export const quran = {
+  addSession, updateSession, deleteSession,
+  summarizeDay, summarizeMonth,           // نقيّتان
+  nextFromLastPosition,
+  recomputeSessionsForDataVersion,        // إجراء صريح عند تصحيح بيانات المصحف (6.3)
+};
+
+// ── الزكاة ──
+export const zakat = {
+  /** نقية تماماً: لا قراءة ولا كتابة. تُغذّى بلقطة. */
+  compute,                                // computeZakat(input): ZakatComputation
+  buildSnapshot,                          // من محدِّدات النواة (قراءة فقط)
+  planHawl,
+  saveDraft, confirm, cancel, deleteDraft,
+  listRecords, getRecord, listPayments,
+  /** الدفع **لا يُنفَّذ من هنا**: */
+  // pay ⇒ execute({ type: 'payZakat', … })  من domain/api.ts في النواة
+  verifyPaidAgainstLedger,                // الثابت P13 — تجميع خادمي بقراءتين
+};
+
+// ── المشترك ──
+export const text = { normalizeArabic, buildSearchTokens, normalizeQuery };
+export const hijri = { hijriFromDateKey, dateKeyFromHijri, addHijriYear, formatHijri };
+export const notify = { runPersonalNotificationPass, notificationId };
+```
+
+---
+
+## 17. خلاصة العقد لهذه الوحدات
+
+1. **اتجاه واحد:** هذه الوحدات تقرأ النواة وتناديها، والنواة لا تعرفها. والربط الوصفي يُخزَّن في الطرف الوصفي.
+2. **لا أثر ضمني عابر للمجالات:** إكمال مهمة لا يكتب مالاً، وعملية مالية لا تُكمل مهمة.
+3. **المفكرة:** مستندان لكل ملاحظة، ProseMirror JSON، صفر `innerHTML`، وبحث ثلاثي الطبقات بتطبيع عربي موثَّق.
+4. **المهام:** أربع حالات فقط؛ «متأخر» مشتقّ لا مخزَّن ⇒ صفر كتابات وصفر حاجة إلى مُشغِّل مجدول.
+5. **التقويم:** مكوّن واحد نبنيه، يخدم أربع شاشات، بتسمية هجرية/ميلادية مزدوجة و RTL مجاني من المتصفح.
+6. **العبادات:** مستند واحد لكل يوم، كتابة واحدة لكل نقرة، تعمل دون اتصال، وبلا حكم ولا تقييم ولا سلسلة تنكسر.
+7. **القرآن:** سجل جلسات والتقدّم مشتقّ؛ وبيانات المصحف من مصدرين متقاطعين بفحوص تفشل البناء؛ ولا نص قرآني قبل تحقّق أحد عشر شرطاً.
+8. **الزكاة:** احتساب **مستقل بلا قيد**، ودفع **قيد واحد** في الدفتر؛ وكل مسألة خلافية خيارٌ أمام المستخدم بلا افتراضي؛ والسعر مُدخل منه دائماً.
+9. **التقويم الهجري:** المخزَّن ميلادي، والهجري مشتقّ، وإزاحة ±1 يوم مسموحة ولا تُتلف شيئاً.
+10. **عشرون ثابتاً** قابلاً للاختبار، منها **ثلاثة عشر مفروض من الخادم**، و**خمسة عشر قصوراً مُعلَناً** — أخطرها ارتداد دفعة الزكاة، وهو **مُعلَّق على قرار قبل التنفيذ**.
+
+> **أي انحراف عن هذه الوثيقة في الكود = عيب يُصلَح. وأي تغيير فيها يحتاج ADR جديداً وموافقة المالك.**
+> **وأي تعارض بينها وبين `01-financial-core.md` ⇒ النواة هي الحاكمة، وهذه الوثيقة تُصحَّح.**

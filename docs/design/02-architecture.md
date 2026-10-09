@@ -31,6 +31,7 @@
 | 14 | ثغرات مكتشفة في العقد تخصّ هذه الطبقة | المراجعة الهندسية |
 | 15 | مصفوفة تتبّع المتطلبات (1→26) | المالك — إثبات التغطية |
 | 16 | فهرس ADR وما بقي للمالك | المالك |
+| 17 | خلاصة العقد المعماري في عشر جُمل | الجميع |
 
 **اصطلاحات ثابتة:**
 
@@ -398,11 +399,16 @@ RASEED/
 │  │  ├─ ADR-001-minor-unit-dirham.md … ADR-022-getafter-rule.md       (من النواة §1.4)
 │  │  └─ ADR-023-vite-spa.md … ADR-040-router-data-mode.md             (من هذه الوثيقة §16.1)
 │  ├─ design/
-│  │  ├─ 01-financial-core.md          ★ قائم — العقد المحاسبي
+│  │  ├─ 01-financial-core.md          ★ قائم — **العقد المحاسبي المُلزِم**
+│  │  ├─ 01-core-part1-model.md … 01-core-part5-ops.md   ★ قائمة — تفصيل النواة بأجزائها
 │  │  ├─ 02-architecture.md            ★ هذه الوثيقة
-│  │  ├─ 03-security-rules.md           قواعد Firestore/Storage والفهارس (وحدة أخرى)
-│  │  ├─ 04-design-system.md            نظام التصميم والهوية البصرية (وحدة أخرى)
-│  │  ├─ 05-data-model.md               مخطط المجموعات غير المالية (وحدة أخرى)
+│  │  ├─ 03-data-model.md              ★ قائم — مخطط Firestore الكامل والفهارس
+│  │  ├─ 04-security.md                ★ قائم — قواعد Firestore/Storage والخصوصية
+│  │  ├─ 05-design-system.md           ★ قائم — نظام التصميم والهوية البصرية و RTL
+│  │  ├─ 06-module-map.md              ★ قائم — خريطة الوحدات والترابط
+│  │  ├─ 07-recurrence-notifications.md ★ قائم — المتكررات والتنبيهات على Spark
+│  │  ├─ 08-reports.md                 ★ قائم — التقارير والتحليلات والتصدير
+│  │  ├─ 09-personal-worship.md        ★ قائم — المفكرة والمهام والعبادات والزكاة
 │  │  ├─ core-A.md / core-B.md / core-C.md   ★ قائمة — أرشيف تقييم، لا مرجع تنفيذي
 │  ├─ ops/
 │  │  ├─ RUNBOOK.md                     دليل التشغيل والنشر والتراجع
@@ -1870,3 +1876,1061 @@ if (gate === 'schemaAhead') {
 | **لا `Web Push`** | يتطلب خادماً (ق-1). إشعارات داخل التطبيق + `Notification` API عند الإذن **والتطبيق مفتوح** فقط |
 | **لا `persistent storage` بلا طلب** | `navigator.storage.persist()` يُطلب **مرة واحدة** بعد أول عملية ناجحة مع شرح: «لحماية بياناتك المحلية من الحذف التلقائي». رفض المستخدم لا يُعطِّل شيئاً |
 | **تنظيف الكاش عند تسجيل الخروج** | `clearIndexedDbPersistence(db)` بعد `signOut` و`terminate(db)` — وإلا بقيت بيانات مالية على جهاز قد يكون مشتركاً |
+
+---
+
+## 10. إعداد البيئة والأسرار
+
+### 10.1 ADR-032 — ما هو سرّ وما ليس سرّاً
+
+> **`apiKey` الخاص بتطبيق الويب في Firebase ليس سرّاً، ويجب تقييده.
+> ولا يوجد في هذا المشروع أي سرّ حقيقي داخل كود الواجهة — ولا يجوز أن يوجد.**
+
+**لماذا `apiKey` ليس سرّاً — بدقة:**
+
+`apiKey` في Firebase Web **معرِّف مشروع عام لا رمز تخويل**. وظيفته توجيه الطلب إلى المشروع الصحيح
+وربطه بالحصة (quota). يُشحَن حتماً في كل حزمة JavaScript تصل المتصفح، ويمكن لأي زائر استخراجه
+بأداة المطوّر في ثانيتين. **فإخفاؤه مستحيل تقنياً، ومحاولة إخفائه وهم أمني.**
+والحماية الحقيقية طبقتان لا علاقة لهما بالمفتاح:
+
+1. **Firebase Authentication:** لا وصول بلا هوية مُوثَّقة من Google.
+2. **Firestore Security Rules + ق-2:** النظام **مغلق على UID المالك المعتمد**. شخص يملك
+   `apiKey` ويسجّل دخولاً بحساب Google الخاص به **لا يقرأ ولا يكتب بايتاً واحداً** —
+   الإغلاق في القواعد لا في الواجهة (النواة §14.1).
+
+**ولماذا يجب تقييده مع ذلك — ثلاثة أخطار حقيقية باقية:**
+
+| الخطر الباقي | الأثر | التقييد المطلوب |
+|---|---|---|
+| **استهلاك الحصة** | طرف ثالث يستخدم مفتاحك لاستدعاء Identity Toolkit بكثافة ⇒ **تجاوز حصة Spark** ⇒ تعطّل تطبيقك (ق-1: لا ترقية) | **تقييد مفتاح API في Google Cloud Console** بـ HTTP referrers: نطاقات Hosting + `localhost` فقط |
+| **تصيّد على نطاق غريب** | صفحة على نطاق آخر تستخدم مشروعك لتسجيل دخول Google يبدو شرعياً | **قائمة النطاقات المصرَّح بها** في Firebase Auth: `raseed-2fac1.firebaseapp.com`, `raseed-2fac1.web.app`, `localhost` — **ويُحذف ما عداها** |
+| **تمكين خدمات غير مستخدمة** | مفتاح غير مقيَّد بالخدمات يصل إلى واجهات لم نستخدمها | **تقييد المفتاح بالواجهات (API restrictions):** Identity Toolkit, Firestore, Token Service فقط |
+
+**ما يبقى سرّاً حقيقياً — ولا يوجد منه شيء في الواجهة:**
+
+| السرّ | مكانه |
+|---|---|
+| حساب خدمة النشر (`FIREBASE_SERVICE_ACCOUNT`) | **GitHub Secrets فقط.** لا في المستودع ولا في `.env` ولا في الحزمة |
+| مفتاح Admin SDK | **غير موجود في المشروع إطلاقاً** — لا كود خادمي (ق-1). المتطلبات §25 بند 9 |
+| رموز الجلسة | تُدار من Firebase SDK في IndexedDB، لا تُقرأ ولا تُسجَّل (§7.6) |
+
+**`VITE_OWNER_UID` — تحذير إلزامي:** هذا المتغيّر **ليس ضابطاً أمنياً**. وظيفته الوحيدة عرض
+شاشة «حساب غير مُصرَّح» بلطف بدل سلسلة من `permission-denied`. **الحاجز الحقيقي وحده** هو
+`allowedUids()` في `firestore.rules` (النواة §14.3). ويُمنع منعاً باتاً أي حراسة على **البريد**
+(`VITE_OWNER_EMAIL`) لأن البريد قابل للتغيير بينما UID ثابت (ق-2 نصّاً).
+
+### 10.2 ملفات البيئة
+
+| الملف | متتبَّع في git؟ | المحتوى | الاستخدام |
+|---|---|---|---|
+| `.env.example` | **نعم** | المفاتيح بلا قيم + شرح عربي | قالب للمطوّر ومرجع للمتغيّرات المطلوبة |
+| `.env.local` | **لا** (في `.gitignore`) | قيم مشروع `raseed-2fac1` الحقيقية | التطوير المحلي |
+| `.env.test` | **نعم** | قيم المحاكي الثابتة لمشروع `demo-raseed` | الاختبارات و CI — **لا قيم حقيقية** |
+| متغيّرات بيئة CI | — | من GitHub Variables/Secrets | بناء النشر |
+
+`.env.example` القائم **يُوسَّع** بما يلي (الموجود يبقى كما هو):
+
+```bash
+# ── إضافات مطلوبة على .env.example القائم ─────────────────────────────
+# نسخة التطبيق المعروضة في شاشة «حول» وفي سجل الأخطاء (تُولَّد في البناء من git)
+VITE_APP_VERSION=dev
+
+# منافذ المحاكي — تُطابق firebase.json
+VITE_EMULATOR_AUTH_PORT=9099
+VITE_EMULATOR_FIRESTORE_PORT=8080
+
+# تفعيل أدوات التشخيص (TanStack Devtools، شاشة سجل الأخطاء الموسّعة)
+VITE_ENABLE_DEVTOOLS=false
+```
+
+`.env.test` (جديد، متتبَّع — بلا أي سرّ):
+
+```bash
+VITE_FIREBASE_API_KEY=demo-key
+VITE_FIREBASE_AUTH_DOMAIN=localhost
+VITE_FIREBASE_PROJECT_ID=demo-raseed
+VITE_FIREBASE_STORAGE_BUCKET=demo-raseed.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=000000000000
+VITE_FIREBASE_APP_ID=1:000000000000:web:0000000000000000000000
+VITE_OWNER_EMAIL=owner@example.test
+VITE_OWNER_UID=test-owner-uid
+VITE_USE_EMULATORS=true
+VITE_APP_VERSION=test
+```
+
+> **لماذا بادئة `demo-` في معرّف مشروع الاختبار ليست تفصيلاً:** محاكي Firestore يتعامل مع أي
+> `projectId` يبدأ بـ `demo-` كمشروع **غير موجود فعلاً**، فيرفض أي محاولة اتصال بالسحابة.
+> هذا يجعل **استحالة لمس البيانات الحقيقية من الاختبارات ضماناً تقنياً لا انتباهاً بشرياً** —
+> وهو مطلب المتطلبات §25 بند 11 حرفياً.
+
+### 10.3 كيف تُحقن المفاتيح ويُتحقَّق منها
+
+**الحقن:** Vite يستبدل `import.meta.env.VITE_*` **وقت البناء** بقيم نصية ثابتة.
+لا قراءة بيئة وقت التشغيل، ولا متغيّر بلا بادئة `VITE_` يصل المتصفح (حماية Vite الافتراضية
+من تسريب أسرار الخادم).
+
+**التحقق — بوابة الإقلاع الأولى، تفشل سريعاً:**
+
+```ts
+// lib/env.ts
+import { z } from 'zod'
+
+const zEnv = z.strictObject({
+  VITE_FIREBASE_API_KEY:             z.string().min(10),
+  VITE_FIREBASE_AUTH_DOMAIN:         z.string().min(3),
+  VITE_FIREBASE_PROJECT_ID:          z.string().min(3),
+  VITE_FIREBASE_STORAGE_BUCKET:      z.string().min(3),
+  VITE_FIREBASE_MESSAGING_SENDER_ID: z.string().regex(/^\d+$/),
+  VITE_FIREBASE_APP_ID:              z.string().min(10),
+  VITE_FIREBASE_MEASUREMENT_ID:      z.string().optional(),
+  VITE_OWNER_EMAIL:                  z.string().email(),
+  VITE_OWNER_UID:                    z.string().min(1),
+  VITE_USE_EMULATORS:                z.enum(['true', 'false']).transform((v) => v === 'true'),
+  VITE_APP_VERSION:                  z.string().default('dev'),
+  VITE_ENABLE_DEVTOOLS:              z.enum(['true', 'false']).default('false')
+                                       .transform((v) => v === 'true'),
+})
+
+const parsed = zEnv.safeParse(import.meta.env)
+
+/**
+ * **فشل سريع مقصود.** تطبيق مالي يُقلع بإعداد ناقص يُنتج أخطاء `permission-denied` غامضة
+ * أو — أسوأ — يتصل **بمشروع خاطئ**. البديل (قيم افتراضية) مرفوض: ليس هناك قيمة افتراضية
+ * معقولة لمعرّف مشروع قاعدة بيانات مالية.
+ */
+export const env = parsed.success ? parsed.data : null
+export const envErrors: readonly string[] = parsed.success
+  ? []
+  : Object.entries(z.flattenError(parsed.error).fieldErrors)
+      .map(([k, v]) => `${k}: ${(v ?? []).join(', ')}`)
+```
+
+`src/main.tsx` يفحص `env === null` **قبل** `initializeApp` ويعرض `EnvErrorScreen` —
+شاشة HTML ساكنة لا تعتمد على الموجِّه ولا على Firebase ولا على أي موفِّر.
+
+**حارس إضافي في البناء** (`scripts/check-env.mjs` في `prebuild`): يرفض البناء إن كان
+`VITE_FIREBASE_PROJECT_ID` يبدأ بـ `demo-` أو `VITE_USE_EMULATORS=true`
+⇒ **استحالة نشر حزمة مُوجَّهة إلى المحاكي**.
+
+### 10.4 `firebase.json` — الترويسات ومنافذ المحاكي
+
+```jsonc
+{
+  "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
+  "storage":   { "rules": "storage.rules" },           // منع كامل حتى Blaze (ق-1)
+  "hosting": {
+    "public": "dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [{ "source": "**", "destination": "/index.html" }],
+    "headers": [
+      {
+        // index.html لا يُخزَّن أبداً: وإلا بقي المستخدم على نسخة قديمة بعد النشر
+        "source": "/index.html",
+        "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }]
+      },
+      {
+        // الأصول مُبصَمة بالتجزئة من Vite ⇒ تخزين دائم آمن
+        "source": "/assets/**",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      },
+      {
+        // عامل الخدمة لا يُخزَّن، وإلا لم يُكتشف التحديث
+        "source": "/sw.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }]
+      },
+      {
+        "source": "**",
+        "headers": [
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "X-Frame-Options", "value": "DENY" },
+          { "key": "Referrer-Policy", "value": "no-referrer" },
+          { "key": "Permissions-Policy",
+            "value": "geolocation=(self), camera=(), microphone=(), payment=()" },
+          { "key": "Strict-Transport-Security",
+            "value": "max-age=31536000; includeSubDomains" },
+          { "key": "Content-Security-Policy", "value":
+            "default-src 'self'; "
+            + "script-src 'self'; "
+            + "style-src 'self' 'unsafe-inline'; "
+            + "font-src 'self'; "
+            + "img-src 'self' data: https://lh3.googleusercontent.com; "
+            + "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com "
+            +   "wss://*.firebaseio.com https://firestore.googleapis.com "
+            +   "https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; "
+            + "frame-src https://raseed-2fac1.firebaseapp.com https://accounts.google.com; "
+            + "frame-ancestors 'none'; base-uri 'self'; form-action 'none'; "
+            + "object-src 'none'" }
+        ]
+      }
+    ]
+  },
+  "emulators": {
+    "auth":      { "port": 9099 },
+    "firestore": { "port": 8080 },
+    "hosting":   { "port": 5000 },
+    "ui":        { "enabled": true, "port": 4000 },
+    "singleProjectMode": true
+  }
+}
+```
+
+**ثلاث نقاط في CSP تحتاج تبريراً:**
+
+1. **`frame-src` يسمح بـ `raseed-2fac1.firebaseapp.com` و`accounts.google.com`**:
+   تسجيل الدخول بـ Google يعمل عبر إطار/نافذة معالج المصادقة. حذفهما **يُعطِّل المصادقة كلياً** —
+   وهي المسار الوحيد للنظام (ق-2).
+2. **`img-src` يسمح بـ `lh3.googleusercontent.com`**: صورة ملف المستخدم من حساب Google
+   (المتطلبات §21). ولا نطاق صور آخر.
+3. **`style-src 'unsafe-inline'`**: Tailwind 4 + المتغيّرات الديناميكية للسمات تُنتج أنماطاً
+   مضمَّنة. **انحراف معلن**، ومُخفَّف بأن `script-src` **لا يحتوي** `'unsafe-inline'` ولا
+   `'unsafe-eval'` — وهي التي تُستغَل في XSS فعلاً. و`form-action 'none'` لأن النظام لا يُرسِل
+   أي نموذج HTML تقليدي (كل الكتابات عبر SDK).
+
+### 10.5 تهيئة Firebase — ما يجب على المالك فعله يدوياً مرة واحدة
+
+> **حالة اليوم المفحوصة: لا تطبيق ويب مُسجَّل، ولا قاعدة Firestore مُنشأة** ⇒ لا `firebaseConfig`
+> بعد. هذه الخطوات **تسبق أي كود**، وتُوثَّق في `docs/ops/FIREBASE-SETUP.md`.
+
+| # | الخطوة | المخرَج |
+|---|---|---|
+| 1 | تسجيل تطبيق ويب في مشروع `raseed-2fac1` | `firebaseConfig` ⇒ يُنسَخ إلى `.env.local` |
+| 2 | إنشاء قاعدة Firestore — **الوضع: Production** والموقع `europe-west*` (أقرب للمنطقة) | قاعدة فارغة بقواعد مُقيَّدة |
+| 3 | تفعيل مزوّد Google في Authentication، **وتعطيل كل المزوّدين الآخرين** (ق-2) | مصادقة بمزوّد وحيد |
+| 4 | أول تسجيل دخول بـ `albarshi.96@gmail.com` ⇒ `scripts/print-owner-uid.ts` | UID المالك ⇒ `allowedUids()` في القواعد + `.env.local` |
+| 5 | تقييد مفتاح API (referrers + APIs) في Google Cloud Console | §10.1 |
+| 6 | تقليص «النطاقات المصرَّح بها» في Auth إلى الثلاثة المذكورة | §10.1 |
+| 7 | نشر القواعد والفهارس **بعد** اختبارها بالمحاكي والموافقة (المتطلبات §25 بند 10) | `firebase deploy --only firestore` |
+| 8 | **لا إنشاء Storage bucket** (ق-1) — `storage.rules` بمنع كامل احتياطاً | المرفقات مؤجَّلة |
+
+**ملاحظة على الخطوة 2:** اختيار **Production mode** لا Test mode ليس تفصيلاً: Test mode يفتح
+القاعدة للعالم 30 يوماً، وأي بيانات مالية تُدخل خلالها تكون مكشوفة. والنواة §14.3 تبدأ بـ
+`allow write: if false` افتراضياً — وهو ما يتوافق مع Production mode.
+
+---
+
+## 11. التوجيه والمصادقة وتسلسل الإقلاع
+
+### 11.1 ADR-040 — `react-router` كموجِّه بيانات في المتصفح
+
+**القرار:** `createBrowserRouter` مع `lazy` لكل مسار. **بلا `loader` يجلب بيانات.**
+
+**لماذا بلا `loader`؟** `loader` يفترض «اجلب ثم اعرض»، ونموذجنا «اشترك ثم استقبل».
+استخدامه يعني قراءة مفوترة إضافية قبل كل انتقال، ثم اشتراكاً يُعيد نفس البيانات.
+المستخدم الصحيح لـ `loader` عندنا: **تهيئة لا بيانات** — التحقق من صلاحية المعرّف في المسار
+(`/accounts/:id` بمعرّف غير موجود ⇒ `errorElement`) وذلك من لقطة الحسابات الحاضرة أصلاً، بصفر قراءات.
+
+```tsx
+// app/router/routes.tsx
+export const router = createBrowserRouter([
+  { path: '/login', element: <SignInScreen /> },
+  {
+    path: '/',
+    element: <AuthGuard><OwnerGuard><AppLayout /></OwnerGuard></AuthGuard>,
+    errorElement: <RouteErrorBoundary />,
+    children: [
+      { index: true,              lazy: () => import('@/features/dashboard') },
+      { path: 'accounts',         lazy: () => import('@/features/accounts') },
+      { path: 'accounts/:id',     lazy: () => import('@/features/accounts/routes/detail') },
+      { path: 'transactions',     lazy: () => import('@/features/transactions') },
+      { path: 'obligations',      lazy: () => import('@/features/obligations') },
+      { path: 'debts/payable',    lazy: () => import('@/features/debts/routes/payable') },
+      { path: 'debts/receivable', lazy: () => import('@/features/debts/routes/receivable') },
+      { path: 'household',        lazy: () => import('@/features/household') },
+      { path: 'budgets',          lazy: () => import('@/features/budgets') },
+      { path: 'goals',            lazy: () => import('@/features/goals') },
+      { path: 'planning',         lazy: () => import('@/features/planning') },
+      { path: 'notes',            lazy: () => import('@/features/notes') },
+      { path: 'tasks',            lazy: () => import('@/features/tasks') },
+      { path: 'worship/*',        lazy: () => import('@/features/worship') },
+      { path: 'reports',          lazy: () => import('@/features/reports') },
+      { path: 'notifications',    lazy: () => import('@/features/notifications') },
+      { path: 'settings/*',       lazy: () => import('@/features/settings') },
+      { path: 'integrity',        lazy: () => import('@/features/integrity') },
+      { path: 'backup',           lazy: () => import('@/features/backup') },
+      { path: '*',                element: <NotFoundPage /> },
+    ],
+  },
+])
+```
+
+**تقسيم الحزمة الناتج:** حزمة أولى = القوقعة + المصادقة + لوحة التحكم. كل ميزة أخرى حزمة
+مستقلة تُحمَّل عند أول زيارة. وحزمتا `firebase` و`react` مفصولتان أصلاً في `vite.config.ts` القائم
+⇒ تُخزَّنان بالتجزئة ولا تتغيّران مع كل نشر.
+
+### 11.2 المصادقة — Google فقط (ق-2)
+
+```ts
+// data/auth/googleSignIn.ts
+const provider = new GoogleAuthProvider()
+provider.setCustomParameters({ prompt: 'select_account' })
+
+/**
+ * نافذة منبثقة افتراضاً، وتراجع إلى إعادة التوجيه عند فشلها.
+ * **السبب عملي لا نظري:** داخل تطبيق PWA مثبَّت على iOS وفي بعض متصفحات الهاتف
+ * تُحجب النوافذ المنبثقة ⇒ تسجيل دخول لا يعمل ⇒ **لا وصول للنظام إطلاقاً** (مزوّد وحيد).
+ */
+export async function signInWithGoogle(): Promise<void> {
+  try {
+    await signInWithPopup(auth, provider)
+  } catch (e) {
+    const code = isFirebaseError(e) ? e.code : ''
+    if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment'
+        || code === 'auth/cancelled-popup-request') {
+      await signInWithRedirect(auth, provider)
+      return
+    }
+    if (code === 'auth/popup-closed-by-user') return      // إلغاء المستخدم ليس خطأ
+    throw toAppError(e)
+  }
+}
+```
+
+**تسجيل الخروج الكامل — خمس خطوات بترتيب مُلزِم:**
+
+```ts
+// data/auth/session.ts
+export async function signOutCompletely(): Promise<void> {
+  disposeAllLive()                       // 1) أوقف كل المستمعات قبل فقد الهوية
+  await signOut(auth)                    // 2) أسقط الجلسة
+  queryClient.clear()                    // 3) امسح ذاكرة الاستعلامات
+  resetAllStores()                       // 4) أعد المتاجر المحلية إلى حالتها الأولى
+  await terminate(db)                     // 5) أغلق Firestore ثم
+  await clearIndexedDbPersistence(db)     //    امسح الكاش المحلي (قد يكون الجهاز مشتركاً)
+  location.replace('/login')              //    إعادة تحميل نظيفة
+}
+```
+
+**الترتيب ليس اختيارياً:** إيقاف المستمعات **قبل** `signOut` يمنع موجة `permission-denied`
+من كل اشتراك قائم. و`terminate` **قبل** `clearIndexedDbPersistence` شرط تقني (الأخيرة تفشل
+على مثيل نشط).
+
+**الحراستان — وما تفعله كل واحدة بالضبط:**
+
+| الحراسة | تفحص | عند الفشل | **هل هي أمان؟** |
+|---|---|---|---|
+| `AuthGuard` | `uid !== null` | توجيه إلى `/login` | **لا** — تجربة استخدام |
+| `OwnerGuard` | `uid === env.VITE_OWNER_UID` | `UnauthorizedScreen` + زر خروج | **لا** — رسالة لطيفة بدل سلسلة أخطاء |
+
+> **تأكيد إلزامي (المتطلبات §20 و§25 بند 10):** إخفاء عنصر واجهة ليس حماية. الحاجز الوحيد
+> هو `allowedUids()` في `firestore.rules`. ويُثبَت ذلك باختبار محاكي صريح
+> (`tests/rules/isolation.rules.test.ts`): UID غير معتمد يُرفَض في **القراءة والكتابة معاً**،
+> على كل مجموعة.
+
+### 11.3 عرض ذرّية الملكية: التهيئة قبل أي كتابة
+
+`data/seed/ensureSeed.ts` يُنفَّذ **مرة واحدة لكل حساب** ويجب أن يكون **idempotent** تماماً
+(النواة §3.3): معرّفات الحسابات والفئات حتمية (`accountIdOf(code) = sha1(code).slice(0,20)`)،
+والكتابة بـ `writeBatch` مجزَّأ ≤450.
+
+```
+ensureSeed(uid):
+  schema = get meta/schema          (قراءة واحدة)
+  if schema موجود:  return 'alreadySeeded'
+  // ── الدفعة الأولى: المستندات التي يتوقف عليها عمل النظام ──
+  batch1: meta/integrity { projectionVersion:1, rebuildStatus:'idle', rebuildCursor:null, … }
+          settings/app    (الافتراضيات — المتطلبات §21)
+          accounts × ~45  (شجرة النواة §3.2 بمعرّفات حتمية)
+          categories × ~12 (فئات النواة §3.4 بربط 1:1 مع حسابات expense)
+  batch2: meta/schema { currentVersion: APP_SCHEMA_VERSION, appliedMigrations: [] }   ← **آخر شيء**
+```
+
+**`meta/schema` يُكتب أخيراً وليس أولاً — وهذا قرار يمنع عيباً حقيقياً:** لو كُتب أولاً وانقطع
+الاتصال في منتصف التهيئة، لوجد التشغيل التالي `meta/schema` موجوداً فيُرجِع `alreadySeeded`
+⇒ **نظام بلا شجرة حسابات ولا `meta/integrity`** — وهو بالضبط العيب ع-ج-5 الذي تعالجه النواة.
+بكتابته أخيراً، أي انقطاع يُبقي الحالة «غير مُهيَّأ» فتُعاد التهيئة بأمان (المعرّفات حتمية ⇒
+لا تكرار).
+
+### 11.4 ADR-038 — تسلسل الإقلاع والبوابات الست
+
+```
+┌─ 0. تحقق البيئة (متزامن، بلا شبكة) ──────────────────────────────────────┐
+│  env === null  ⇒  EnvErrorScreen  [نهاية — لا شيء آخر يُحمَّل]            │
+└──────────────────────────────┬───────────────────────────────────────────┘
+┌─ 1. تهيئة Firebase ─────────▼───────────────────────────────────────────┐
+│  initializeApp · getAuth · initializeFirestore(persistentLocalCache)     │
+│  if VITE_USE_EMULATORS: connect*Emulator  (قبل أي استخدام)              │
+└──────────────────────────────┬───────────────────────────────────────────┘
+┌─ 2. بوابة المصادقة ─────────▼───────────────────────────────────────────┐
+│  onAuthStateChanged → uid | null                                        │
+│  null ⇒ SignInScreen (Google فقط — ق-2)                                 │
+└──────────────────────────────┬───────────────────────────────────────────┘
+┌─ 3. بوابة الملكية ──────────▼───────────────────────────────────────────┐
+│  uid !== OWNER_UID ⇒ UnauthorizedScreen  [تجربة استخدام — القواعد هي الحاجز]│
+└──────────────────────────────┬───────────────────────────────────────────┘
+┌─ 4. بوابة التهيئة ──────────▼───────────────────────────────────────────┐
+│  ensureSeed(uid)  ⇒  SeedingScreen أثناء التنفيذ                        │
+│  فشل ⇒ شاشة خطأ + «أعد المحاولة» (لا يمضي أبداً بنصف تهيئة)             │
+└──────────────────────────────┬───────────────────────────────────────────┘
+┌─ 5. بوابة نسخة المخطط ──────▼───────────────────────────────────────────┐
+│  meta/schema.currentVersion > APP_SCHEMA_VERSION                        │
+│     ⇒ ForcedUpdateScreen + updateServiceWorker(true)  [حاجب مطلق]       │
+│  <  ⇒ وضع الترحيل البطيء (ADR-019) — يمضي                              │
+└──────────────────────────────┬───────────────────────────────────────────┘
+┌─ 6. بوابة السلامة ──────────▼───────────────────────────────────────────┐
+│  meta/integrity.rebuildStatus === 'running' ⇒ RebuildingScreen (قراءة فقط)│
+│  auditTrialBalance(accounts)  [0 قراءات إضافية — من اللقطة]             │
+│     غير متوازن ⇒ IntegrityBanner أحمر + **تعطيل كل الترحيل**            │
+│  بصمة الدفتر I10  [2–3 قراءات]                                          │
+└──────────────────────────────┬───────────────────────────────────────────┘
+┌─ 7. مهام بعد الإقلاع (بالترتيب، تسلسلياً) ──▼──────────────────────────┐
+│  (أ) flushOutbox()        تفريغ pendingCommands واحدة واحدة            │
+│  (ب) runCatchUp()         مادّية المتكرر بمعرّفات حتمية                 │
+│  (ج) obligationStatusSweep()  due→overdue بـ writeBatch للمتغيّر فقط    │
+│  (د) notificationSweep()  توليد التنبيهات بمفاتيح idempotency           │
+│  (هـ) backupReminderCheck()  تذكير بأخذ نسخة (ق-1)                      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**لماذا هذا الترتيب بالضبط — خمس نقاط لا تُقلَب:**
+
+| الترتيب | السبب |
+|---|---|
+| البيئة قبل كل شيء | تهيئة Firebase بإعداد ناقص قد تتصل **بمشروع خاطئ** |
+| الملكية قبل التهيئة | وإلا أنشأ أي حساب Google شجرة حسابات في `users/{uidه}` — وهي كتابة ترفضها القواعد (ق-2) لكن محاولتها تُنتج أخطاء مُرْبِكة وتستهلك الحصة |
+| التهيئة قبل بوابة المخطط | `meta/schema` لا يوجد قبل التهيئة ⇒ فحص النسخة على `null` |
+| بوابتا المخطط وإعادة البناء **قبل** أي كتابة | كلتاهما حاجبة للكتابة (النواة §17.2 و I24). تشغيل التفريغ قبلهما يُنتج كتابات مرفوضة تُسجَّل كأخطاء |
+| **(أ) قبل (ب)** | عملية دون اتصال من أمس يجب أن تُرحَّل **قبل** استدراك اليوم، وإلا اختلف ترتيب القيود عن ترتيب النيّة وقد يُرفَض أحدها بحدّ الرصيد لسبب مُصطنع (النواة §6.6 بند 6) |
+
+**حراسة التكرار اليومي:** (ج) و(د) و(هـ) تعمل **مرة واحدة لكل يوم محلي** بحارس
+`settings/app.lastSweepDateKey` (بتوقيت طرابلس — ADR-033). فتح التطبيق عشر مرات في اليوم
+⇒ مسح واحد. وفشل أي مهمة منها **لا يحجب التطبيق**: تُسجَّل وتُعاد في الفتحة التالية.
+
+### 11.5 ADR-033 — التاريخ المحاسبي بتوقيت طرابلس الثابت
+
+```ts
+// lib/time/tripoli.ts
+/**
+ * ليبيا على UTC+2 ثابتاً، **بلا توقيت صيفي**. هذا يجعل الإزاحة ثابتة ويُغني عن مكتبة مناطق زمنية.
+ *
+ * **لماذا لا نستخدم توقيت المتصفح:** bookedAt و periodKey يُخزَّنان على قيد **غير قابل للتغيير**
+ * (النواة §4.3 و ADR-008). جهاز بمنطقة زمنية مختلفة (سفر، أو هاتف بإعداد خاطئ) يُنتج
+ * **periodKey مختلفاً لنفس اللحظة** ⇒ مصروف ليلة 31 أكتوبر يهبط في نوفمبر على جهاز وأكتوبر
+ * على آخر ⇒ ملخّصان شهريان متناقضان لا يكشفهما أي ثابت، ولا يُصلَحان إلا بقيد عكس.
+ */
+const TRIPOLI_OFFSET_MINUTES = 120
+
+export function todayDateKey(): DateKey
+export function toDateKey(instant: Date): DateKey
+export function nowIso(): string
+export function dateKeyToUtcNoon(dk: DateKey): Date      // bookedAtTs — منتصف نهار UTC
+export function periodKeyOf(dk: DateKey): PeriodKey      // ≡ dk.slice(0,7)
+```
+
+**هذا انحراف لفظي عن النواة §4.3** («`bookedAt` بتوقيت المستخدم المحلي») **وتثبيت لما هو
+مُنفَّذ فعلاً في `eslint.config.js`** (حظر `new Date()` مع توجيه إلى `lib/time`).
+وهو **تضييق لا توسيع**: لمستخدم مقيم في ليبيا، «التوقيت المحلي» **هو** توقيت طرابلس، والفرق
+يظهر فقط عند السفر — وهناك يكون الثبات هو الصواب. **يُرفَع في §14.1 و§16.2 لإقرار المالك.**
+
+---
+
+## 12. الأدوات والسكربتات و CI
+
+### 12.1 ADR-036 — طوبولوجيا الاختبار
+
+| الطبقة | الأداة | البيئة | المدى | متى تعمل |
+|---|---|---|---|---|
+| **وحدة نقية** | Vitest 5 + fast-check 4 | `node` | `src/domain/**` | `pre-push` + CI (ثوانٍ) |
+| **مكوّنات** | Vitest + Testing Library + jsdom | `jsdom` | `src/{ui,features}/**` | CI |
+| **قواعد الأمان** | `@firebase/rules-unit-testing` 6 | `node` + محاكي Firestore | `firestore.rules` | CI (محاكي) |
+| **تكامل** | Vitest + محاكي | `node` + محاكي | `postOperation` والمعاملات | CI (محاكي) |
+| **E2E** | Playwright 1.64 | متصفح + محاكي + `vite preview` | رحلات المستخدم | CI (مهمة منفصلة) |
+| **إتاحة** | `@axe-core/playwright` 4.13 | متصفح | RTL + تباين + قارئات | CI مع E2E |
+
+**عتبات تغطية مفروضة في CI** (لا للتجميل — `src/domain` هو ما لا يُسمح بخطئه):
+
+| المسار | أسطر | فروع | دوال |
+|---|---|---|---|
+| `src/domain/money/**` | **100%** | **100%** | **100%** |
+| `src/domain/{ledger,ops,rules}/**` | **95%** | **95%** | **95%** |
+| `src/domain/**` (الباقي) | 90% | 85% | 90% |
+| `src/data/**` | 70% | 60% | 70% |
+| `src/{features,ui}/**` | 50% | 40% | 50% |
+
+### 12.2 سكربتات `package.json` — تُضاف كاملة
+
+> **`package.json` القائم لا يحتوي أي سكربت.** هذه الكتلة تُضاف كما هي.
+
+```jsonc
+{
+  "scripts": {
+    "dev":                "vite",
+    "dev:emu":            "concurrently -k -n emu,vite \"npm:emu\" \"vite --mode test\"",
+    "build":              "npm run check:env && tsc --noEmit && vite build",
+    "preview":            "vite preview --port 4173 --strictPort",
+
+    "check:env":          "node scripts/check-env.mjs",
+    "typecheck":          "tsc --noEmit",
+    "lint":               "eslint . --max-warnings 0",
+    "lint:fix":           "eslint . --fix",
+    "lint:layers":        "node scripts/verify-layers.mjs",
+    "format":             "prettier --write .",
+    "format:check":       "prettier --check .",
+
+    "test":               "vitest run --project unit --project dom",
+    "test:watch":         "vitest --project unit",
+    "test:unit":          "vitest run --project unit",
+    "test:dom":           "vitest run --project dom",
+    "test:rules":         "firebase emulators:exec --only firestore --project demo-raseed \"vitest run --project rules\"",
+    "test:integration":   "firebase emulators:exec --only firestore,auth --project demo-raseed \"vitest run --project integration\"",
+    "test:coverage":      "vitest run --project unit --project dom --coverage",
+    "test:all":           "npm run test && npm run test:rules && npm run test:integration",
+
+    "e2e":                "playwright test",
+    "e2e:ui":             "playwright test --ui",
+    "e2e:install":        "playwright install --with-deps chromium",
+
+    "emu":                "firebase emulators:start --project demo-raseed",
+    "emu:export":         "firebase emulators:export tests/fixtures/emulator-data --project demo-raseed",
+    "seed":               "tsx scripts/seed-chart-of-accounts.ts",
+    "owner:uid":          "tsx scripts/print-owner-uid.ts",
+    "backup":             "tsx scripts/export-backup.ts",
+
+    "rules:deploy":       "firebase deploy --only firestore:rules",
+    "indexes:deploy":     "firebase deploy --only firestore:indexes",
+    "deploy":             "npm run verify && firebase deploy --only hosting,firestore",
+
+    "verify":             "npm run format:check && npm run lint && npm run lint:layers && npm run typecheck && npm run test:all",
+    "prepare":            "husky"
+  }
+}
+```
+
+**`npm run verify` هو البوابة الوحيدة المعتمدة قبل أي نشر** (المتطلبات §23 بند 15 و§25 بند 13)،
+وهي نفسها التي يشغّلها CI — **لا يوجد فحص في CI غير موجود محلياً، ولا العكس**.
+
+### 12.3 الحزم — المثبَّت فعلاً والمطلوب إضافته
+
+**مثبَّت فعلاً** (من `package.json` و`package-lock.json` القائمين — هذه وقائع لا مقترحات):
+
+| الحزمة | الإصدار | الدور |
+|---|---|---|
+| `react` · `react-dom` | `19.3.0` | الواجهة |
+| `typescript` | `6.0.3` | الأنواع |
+| `vite` · `@vitejs/plugin-react` | `8.3.4` · `6.1.2` | البناء |
+| `firebase` | `13.0.0` | Firestore + Auth |
+| `@tanstack/react-query` | `5.104.1` | حالة الخادم |
+| `zustand` | `5.0.15` | الحالة المحلية |
+| `zod` | `4.6.5` | التحقق |
+| `react-router` | `8.4.0` | التوجيه |
+| `tailwindcss` · `@tailwindcss/vite` | `4.3.3` | التنسيق |
+| `vite-plugin-pwa` | `2.0.0` | PWA |
+| `date-fns` | `4.4.0` | التواريخ |
+| `lucide-react` | `1.54.0` | الأيقونات |
+| `clsx` · `tailwind-merge` · `class-variance-authority` | `2.1.1` · `3.7.0` · `0.7.1` | تركيب الأصناف |
+| `vitest` · `@vitest/coverage-v8` | `5.0.3` | الاختبار |
+| `@firebase/rules-unit-testing` | `6.0.0` | اختبار القواعد |
+| `fast-check` | `4.10.2` | اختبارات الخصائص |
+| `@testing-library/react` · `jest-dom` | `16.3.3` · `7.0.1` | اختبار المكوّنات |
+| `jsdom` | `30.1.2` | بيئة DOM |
+| `eslint` · `typescript-eslint` | `10.12.0` · `8.71.1` | الفحص |
+| `prettier` · `prettier-plugin-tailwindcss` | `3.9.9` · `0.8.1` | التنسيق |
+
+**مطلوب إضافته** (إصدارات مُتحقَّق منها من مسجل npm):
+
+| الحزمة | الإصدار | الدور | لماذا الآن |
+|---|---|---|---|
+| `@playwright/test` | `^1.64.0` | E2E | المتطلبات §23 بنود 10 و11 و13 |
+| `@axe-core/playwright` | `^4.13.0` | إتاحة | RTL والتباين (§3) آلياً لا بالعين |
+| `husky` | `^9.1.7` | خطّافات git | النواة §21.2: بوابة ما قبل الدفع |
+| `lint-staged` | `^17.6.0` | فحص المُدرَج | تنسيق وفحص ما تغيّر فقط |
+| `firebase-tools` | `^15.33.0` | محاكي ونشر | **كاعتمادية تطوير** لتثبيت الإصدار في CI ومحلياً |
+| `eslint-config-prettier` | `^10.1.8` | توافق | يُلغي قواعد ESLint المتعارضة مع Prettier |
+| `eslint-plugin-jsx-a11y` | `^6.10.2` | إتاحة | المتطلبات §3: `aria`، تسميات، أدوار |
+| `@vitest/ui` | `^5.0.3` | تشخيص | اختياري للتطوير |
+| `tsx` | `^4.x` | تشغيل سكربتات TS | `scripts/*.ts` |
+| `concurrently` | `^9.x` | تشغيل متوازٍ | `dev:emu` |
+
+> **قاعدة مُلزِمة على `firebase-tools`:** يُثبَّت **كاعتمادية تطوير** لا يُعتمد على نسخة مُثبَّتة
+> عالمياً. السبب: نسخة المحاكي تؤثر في سلوك تقييم القواعد، واختبار قواعد ينجح محلياً ويفشل في CI
+> (أو العكس) بسبب فرق إصدار هو أسوأ أنواع التعطّل — ويضرب مباشرة المتطلبات §25 بند 10.
+
+### 12.4 Prettier و lint-staged و husky
+
+```jsonc
+// .prettierrc.json — يطابق النمط القائم في الكود المكتوب فعلاً
+{
+  "semi": false,
+  "singleQuote": true,
+  "printWidth": 100,
+  "tabWidth": 2,
+  "trailingComma": "all",
+  "arrowParens": "always",
+  "endOfLine": "lf",
+  "plugins": ["prettier-plugin-tailwindcss"]
+}
+```
+
+```jsonc
+// package.json → "lint-staged"
+{
+  "lint-staged": {
+    "*.{ts,tsx}":        ["eslint --fix --max-warnings 0", "prettier --write"],
+    "*.{json,css,md}":   ["prettier --write"],
+    "firestore.rules":   ["prettier --write --parser babel"]
+  }
+}
+```
+
+```bash
+# .husky/pre-commit
+npx lint-staged
+
+# .husky/pre-push  — النواة §21.2 حرفياً + حدود الطبقات
+npm run typecheck
+npm run lint
+npm run lint:layers
+npm run test:unit
+```
+
+**`pre-push` لا يشغّل اختبارات المحاكي عن قصد:** تشغيل المحاكي يستغرق ~20 ثانية، ودفع يستغرق
+دقيقة يُغري بـ `--no-verify`. اختبارات القواعد والتكامل مكانها CI حيث **لا يمكن تخطّيها**.
+وهذا توزيع واعٍ: السرعة محلياً، الصلابة في CI.
+
+### 12.5 `vitest.config.ts` و `playwright.config.ts`
+
+```ts
+// vitest.config.ts
+export default defineConfig({
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
+  test: {
+    projects: [
+      {
+        test: {
+          name: 'unit', environment: 'node', globals: false,
+          include: ['tests/unit/**/*.test.ts'],
+          setupFiles: ['tests/setup/vitest.unit.ts'],
+        },
+      },
+      {
+        test: {
+          name: 'dom', environment: 'jsdom', globals: false,
+          include: ['tests/dom/**/*.test.{ts,tsx}'],
+          setupFiles: ['tests/setup/vitest.dom.ts'],
+        },
+      },
+      {
+        test: {
+          name: 'rules', environment: 'node',
+          include: ['tests/rules/**/*.test.ts'],
+          setupFiles: ['tests/setup/emulator.ts'],
+          // تسلسلي: كل الاختبارات تتشارك مثيل محاكي واحد وتنظيفه بين الحالات
+          fileParallelism: false, testTimeout: 20_000,
+        },
+      },
+      {
+        test: {
+          name: 'integration', environment: 'node',
+          include: ['tests/integration/**/*.test.ts'],
+          setupFiles: ['tests/setup/emulator.ts'],
+          fileParallelism: false, testTimeout: 30_000,
+        },
+      },
+    ],
+    coverage: {
+      provider: 'v8', reporter: ['text', 'html', 'lcov'],
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.d.ts', 'src/**/index.ts', 'src/app/boot/screens/**'],
+      thresholds: {
+        'src/domain/money/**':   { lines: 100, branches: 100, functions: 100 },
+        'src/domain/ledger/**':  { lines: 95,  branches: 95,  functions: 95 },
+        'src/domain/ops/**':     { lines: 95,  branches: 95,  functions: 95 },
+        'src/domain/rules/**':   { lines: 95,  branches: 95,  functions: 95 },
+        'src/domain/**':         { lines: 90,  branches: 85,  functions: 90 },
+        'src/data/**':           { lines: 70,  branches: 60,  functions: 70 },
+      },
+    },
+  },
+})
+```
+
+```ts
+// playwright.config.ts
+export default defineConfig({
+  testDir: './tests/e2e',
+  fullyParallel: false,                 // محاكي واحد مشترك
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? [['github'], ['html']] : [['list']],
+  use: {
+    baseURL: 'http://localhost:4173',
+    locale: 'ar-LY',
+    timezoneId: 'Africa/Tripoli',       // يطابق ADR-033 — وإلا اختلفت حدود الشهر في الاختبار
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+  projects: [
+    { name: 'desktop', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
+    { name: 'mobile',  use: { ...devices['Pixel 7'] } },
+  ],
+  /**
+   * **المحاكي إلزامي: لا اختبار E2E يلمس مشروعاً حقيقياً أبداً** (المتطلبات §25 بند 11).
+   * ومعرّف demo-raseed يجعل ذلك ضماناً تقنياً (§10.2).
+   */
+  webServer: [
+    { command: 'npm run emu', url: 'http://localhost:4000', reuseExistingServer: !process.env.CI,
+      timeout: 60_000 },
+    { command: 'npm run build -- --mode test && npm run preview', url: 'http://localhost:4173',
+      reuseExistingServer: !process.env.CI, timeout: 120_000 },
+  ],
+})
+```
+
+**المصادقة في E2E:** لا تسجيل دخول Google حقيقي (غير قابل للأتمتة ويخالف شروط Google).
+`tests/e2e/fixtures/auth.ts` يُنشئ مستخدماً في **محاكي المصادقة** عبر واجهته الإدارية
+(`POST /identitytoolkit.googleapis.com/v1/accounts:signUp`) بـ `localId` يساوي
+`VITE_OWNER_UID` في `.env.test`، ثم يحفظ `storageState` ويُعاد استخدامه في كل الاختبارات.
+
+### 12.6 ADR-037 — CI و النشر
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'npm' }
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run lint:layers          # شبكة أمان حدود الطبقات (§4.4)
+      - run: npm run typecheck
+
+  unit:
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'npm' }
+      - run: npm ci
+      - run: npm run test:coverage        # يفشل عند هبوط التغطية عن العتبات (§12.1)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: coverage, path: coverage/ }
+
+  emulator:
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'npm' }
+      - uses: actions/setup-java@v4       # محاكي Firestore يحتاج JVM
+        with: { distribution: 'temurin', java-version: '21' }
+      - run: npm ci
+      - run: npm run test:rules           # T-RULES-* — بما فيها عيب الأسبقية ع-أ-1
+      - run: npm run test:integration     # T-IDEM · T-CONC · T-VOID · T-REBUILD · T-SETTLE-LINK
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [unit, emulator]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'npm' }
+      - uses: actions/setup-java@v4
+        with: { distribution: 'temurin', java-version: '21' }
+      - run: npm ci
+      - run: npm run e2e:install
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: playwright-report, path: playwright-report/ }
+
+  build:
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'npm' }
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY:             ${{ vars.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN:         ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID:          ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET:      ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID:              ${{ vars.VITE_FIREBASE_APP_ID }}
+          VITE_OWNER_EMAIL:                  ${{ vars.VITE_OWNER_EMAIL }}
+          VITE_OWNER_UID:                    ${{ vars.VITE_OWNER_UID }}
+          VITE_USE_EMULATORS:                'false'
+          VITE_APP_VERSION:                  ${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with: { name: dist, path: dist/ }
+```
+
+**النشر في ملف منفصل ولا يعمل تلقائياً** (المتطلبات §25 بند 11):
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy
+on: { workflow_dispatch: { inputs: { target: { type: choice, options: [hosting, rules, indexes, all] } } } }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production        # ← يتطلب موافقة يدوية في إعدادات المستودع
+    steps: [ ... npm ci · npm run verify · firebase deploy --only <target> ... ]
+```
+
+**ثلاثة قرارات على CI:**
+
+1. **مفاتيح Firebase في `vars` لا `secrets`.** هي معرّفات عامة (§10.1)، ووضعها في `secrets`
+   يُوهم بأنها أسرار فيُبنى على ذلك الوهم قرار أمني خاطئ لاحقاً. السرّ الوحيد هو حساب خدمة النشر.
+2. **النشر `workflow_dispatch` + بيئة محمية.** المتطلبات §25 بند 11: لا نشر إنتاجي قبل مراجعة
+   الأثر والموافقة. والنشر التلقائي على `main` يخالف ذلك نصّاً.
+3. **نشر القواعد خطوة مستقلة.** النواة §22.2 سؤال 1: `allowedUids()` يحتاج UID المالك، ولا
+   تُنشر القواعد قبل قراره. وخطأ في القواعد يُعطِّل النظام كلياً ⇒ تُنشر وحدها ويُتحقَّق منها فوراً.
+
+---
+
+## 13. RTL والسمات والأداء
+
+### 13.1 RTL حقيقي — بنيوي لا مقلوب
+
+> **المتطلبات §3 تُلزم بـ «RTL حقيقي في كل الصفحات والجداول والقوائم والنوافذ».
+> «حقيقي» تعني: التصميم مبني على خصائص منطقية، لا تصميماً LTR مُقلوباً بـ `direction: rtl`.**
+
+| البند | القرار |
+|---|---|
+| `<html lang="ar" dir="rtl">` | ثابت في `index.html` — **لا تبديل اتجاه في الإصدار الأول** (لا تعدد لغات) |
+| الخصائص | **المنطقية حصراً:** `margin-inline-start`, `padding-inline-end`, `inset-inline-start`, `border-inline-start`, `text-align: start` |
+| أصناف Tailwind | `ms-*`, `me-*`, `ps-*`, `pe-*`, `start-*`, `end-*`, `text-start`, `text-end`, `border-s-*`, `border-e-*` |
+| الفيزيائية (`ml`, `mr`, `pl`, `pr`, `left`, `right`, `text-left`, `text-right`) | **خطأ بناء (B13)** |
+| الأيقونات الاتجاهية | سهم «التالي» يُقلب بـ `rtl:-scale-x-100`؛ أيقونات غير اتجاهية (قلم، سلة) **لا تُقلب** |
+| **الأرقام** | **لاتينية في كل مكان (ق-3)**، مع `font-variant-numeric: tabular-nums` في كل خلية مالية |
+| اتجاه المبالغ | المبلغ كتلة `dir="ltr"` داخل نص عربي حتى لا يتشوّه ترتيب `1,250.500` بخلط الاتجاهات |
+| الجداول | `text-align: start` افتراضاً، والأعمدة المالية `text-align: end` + `tabular-nums` |
+| المخططات | المحور الأفقي يبدأ من **اليمين** (ترتيب زمني RTL) — إعداد صريح في كل مخطط |
+
+```css
+/* index.css — مقتطف مُلزِم */
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  src: url('/fonts/IBMPlexSansArabic-Regular.woff2') format('woff2');
+  font-weight: 400; font-display: swap;
+}
+:root {
+  --font-ar: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  /* ق-3: الأرقام اللاتينية مع محاذاة جدولية — شرط قراءة الأعمدة المالية */
+  --num: tabular-nums;
+}
+.money, td.numeric, th.numeric {
+  font-variant-numeric: var(--num);
+  direction: ltr;              /* المبلغ وحده LTR داخل سياق RTL */
+  text-align: end;
+}
+```
+
+**ADR-035 — الخط مستضاف محلياً لا من Google Fonts.** ثلاثة أسباب: (أ) يعمل **دون اتصال**
+وهو مطلب صريح (§22)؛ (ب) لا طلب لطرف ثالث ⇒ `font-src 'self'` في CSP يبقى مغلقاً و**لا تسريب
+لعنوان IP** لكل زيارة (الخصوصية §20)؛ (ج) `IBM Plex Sans Arabic` يوفّر أرقاماً جدولية
+(`tnum`) وهي شرط تقني لـ ق-3، وليست متاحة في كل الخطوط العربية.
+
+### 13.2 السمات — فاتح وداكن
+
+```css
+/* Tailwind 4: المتغيّر لا الصنف — لأن السمة تُقرأ من data-theme على <html> */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+```
+
+| القرار | التفصيل |
+|---|---|
+| المصدر | `data-theme="light" | "dark"` على `<html>`، يُكتب من `ThemeProvider` |
+| التفضيل | `'light' | 'dark' | 'system'` في `settings/app` (مزامن بين الأجهزة — §21) ومرآته في `themeStore` |
+| وميض السمة (FOUC) | **سكربت مضمَّن صغير في `index.html`** يقرأ `localStorage` ويضع `data-theme` **قبل** أول رسم. وهذا الاستثناء الوحيد المسموح لتخزين تفضيل في `localStorage` |
+| الألوان | رموز دلالية فقط (`--color-surface`, `--color-text`, `--color-positive`, `--color-negative`, `--color-warning`) — **لا لون حرفي في أي مكوّن** |
+| الدلالة المالية | **الموجب والسالب لا يُفرَّقان باللون وحده**: إشارة + أيقونة + نص (`+` / `−`) — شرط إتاحة لعمى الألوان، ويُفحَص بـ axe |
+| التباين | ≥ 4.5:1 للنص العادي و3:1 للكبير، **في السمتين**، مُختبَر آلياً في `rtl-a11y.spec.ts` |
+
+### 13.3 المخططات — SVG داخلي بلا مكتبة
+
+**القرار: مكوّنات مخططات مكتوبة في `ui/charts` بـ SVG، بلا Recharts/Chart.js/D3.**
+
+| السبب | التفصيل |
+|---|---|
+| **الحجم** | ثلاثة أنواع مخططات فقط مطلوبة (أعمدة، خط، دائري — §4). مكتبة كاملة = 40–120KB لثلاثة أشكال |
+| **RTL** | مكتبات المخططات تفترض LTR؛ قلب المحاور والتسميات فيها عملية ترقيع مستمرة مع كل ترقية |
+| **الأرقام** | ق-3 يُلزم بأرقام لاتينية و`formatLYD`؛ المكتبات تُنسِّق داخلياً فتحتاج تجاوزاً في كل محور وتلميح |
+| **التحكّم** | التلميح والتركيز ولوحة المفاتيح (إتاحة §3) تحت سيطرتنا مباشرة |
+
+**الثمن المعلن:** لا مخططات متقدمة (شلال، شمعدان، تكبير وتحريك). عند الحاجة الحقيقية إلى واحد
+منها، تُضاف مكتبة **لتلك الشاشة وحدها** بتحميل كسول — لا للنظام كله.
+
+### 13.4 الأداء — القرارات القابلة للقياس
+
+| البند | القرار | الأثر المقيس |
+|---|---|---|
+| تقسيم الحزمة | مسار لكل ميزة + حزمتا `firebase` و`react` منفصلتان (قائم في `vite.config.ts`) | الحزمة الأولى = القوقعة + المصادقة + اللوحة |
+| قراءات أول فتحة | اشتراك `accounts` واحد (~45) + `periods` + `budgetPeriods` + قوائم محدودة ⇒ **≈120 قراءة** (النواة §15.3) | ~410 فتحة باردة/يوم على Spark |
+| الفتحات التالية في الجلسة | **0–5 قراءات** — السجل يحفظ الاشتراكات (§6.4) | — |
+| كشف الحركة | `useInfiniteQuery` بـ 25 صفّاً/صفحة و`startAfter` | 25 قراءة/صفحة |
+| التقارير | `getAggregateFromServer(sum)` على `postings` | **قراءتان** لأي بُعد |
+| الأشهر المنتهية | تُخزَّن محلياً بعد أول قراءة (**لا تتغيّر أبداً**) ⇒ `gcTime` طويل لمفاتيحها | 11 قراءة مرة واحدة |
+| إعادة التصيير | `select` في TanStack Query (بذاكرة مؤقتة) + `useShallow` لـ Zustand + `React.memo` للصفوف | لقطة واحدة ⇒ تصيير واحد |
+| القوائم الطويلة | **لا محاكاة افتراضية (virtualization) في الإصدار الأول** — الصفحات 25 صفّاً. العتبة المعلنة: إن احتاجت شاشة > 200 صفّاً مرئياً، يُضاف `@tanstack/react-virtual` لتلك الشاشة | — |
+| الصور | لا صور مستخدم (المرفقات مؤجَّلة — ق-1). صورة الملف من Google بـ `loading="lazy"` | — |
+| ميزانية الأداء | LCP < 2.5s و TBT < 200ms على 4G متوسط، **مقيسة في CI** عبر Lighthouse على `preview` | بوابة تحذير لا فشل في الإصدار الأول |
+
+---
+
+## 14. ثغرات مكتشفة في العقد تخصّ هذه الطبقة
+
+> النواة §22 تطلب: «إن وجدت فيها ثغرة تخص مجالك، اذكرها واقترح الحل، لكن لا تغيّر الملف».
+> هذه هي الثغرات التي ظهرت عند تفصيل **طبقة البيانات والواجهة**. لم أعدّل النواة ولا أي ملف آخر.
+
+### 14.1 انحرافات قائمة في الكود عن نص النواة — موقفي من كل واحدة
+
+| # | الانحراف | موقفي | يحتاج إقرار؟ |
+|---|---|---|---|
+| **د-1** | النواة §21.1 تسمّي `money/Minor.ts`، والكود كتب `money/types.ts` (يحمل `Minor` و`Bps` والثوابت) | **أُقِرّه.** ملف واحد لبدائيات المال أصحّ من ملف باسم نوع يحمل خمسة أنواع. **توصية: تُحدَّث §21.1 في النواة لتطابق الكود** | لا — تسمية |
+| **د-2** | النواة §21.1 تذكر `domain`/`data`/`ui` فقط؛ هذه الوثيقة تضيف `app`/`features`/`stores`/`lib` | **توسيع لا نقض.** النواة لم تتناول قوقعة التطبيق، والمنطق المحاسبي يبقى حصراً في `domain` | لا |
+| **د-3** | النواة ADR-018 تنصّ على `eslint-plugin-boundaries`؛ الكود رفضها لثغرات أمنية في اعتمادياتها | **أُقِرّ الرفض** وأُثبِّته في ADR-025 بنفس الفرض وبصفر ثغرات | لا — مبرَّر وموثَّق |
+| **د-4** | النواة §4.3 تقول `bookedAt` «بتوقيت المستخدم المحلي»؛ الكود يفرض `Africa/Tripoli` ثابتاً | **أُقِرّ التثبيت** (ADR-033) لأن `periodKey` محفور على قيد غير قابل للتغيير، وتوقيت المتصفح يُنتج ملخّصين متناقضين لنفس اللحظة | **نعم — §16.2 سؤال 1** |
+| **د-5** | النواة §21.2 B4 تمنع `*` و`/` على `Minor`؛ الكود منع `Math.round/floor/ceil/trunc` فقط | **ناقص.** يُستكمل بمحدِّد على عمليات الضرب/القسمة خارج `domain/money/**` — مُدرَج في §4.4 | لا — إكمال |
+
+### 14.2 ثغرات في قواعد الأمان (النواة §14.3) تحجب طبقة البيانات
+
+> **هذه ليست ملاحظات أسلوبية: كل واحدة منها تمنع عملية مشروعة من النجاح، وتظهر كـ
+> `permission-denied` غامض. وهي من **نفس صنف** العيب ع-أ-9 الذي عالجته النواة بنفسها
+> («لا `match` لمجموعات المُجمَّعات ⇒ كل `postOperation` يفشل»). لم أعدّل أي قاعدة.**
+
+**حالة المراجعة:** قارنتُ كل ثغرة بـ **`docs/design/04-security.md`** القائم (مسوّدة وحدة الأمان
+المتوازية)، لا بنصّ النواة §14.3 وحده. النتيجة: **ثلاث ثغرات عُولجت هناك، وواحدة التقت مع
+قراري ADR-034، وواحدة ما زالت قائمة.**
+
+| # | الثغرة | السيناريو الذي يفشل | الحالة بعد مقارنة `04-security.md` |
+|---|---|---|---|
+| **ق-1** | **لا `match` لمجموعات غير مالية مطلوبة:** `tasks` (§14)، `notes` (§13)، `worshipRecords`/`quranProgress`/`zakatRecords` (§15) — غائبة في النواة §14.3، والافتراضي `allow write: if false` | المفكرة والمهام والعبادات **غير قابلة للكتابة** ⇒ أربع وحدات لا تعمل | **✅ مُعالَجة في `04-security.md`:** يحتوي `match` لـ `notes`, `notebooks`, `tasks`, `taskLists`, `reminders`, `worshipRecords`, `quranProgress`, `zakatRecords`, `attachments`. **أرفع الملاحظة إلى النواة فقط:** §14.3 فيها ناقصة ويجب أن تُحيل إلى `04-security.md` كمرجع القواعد المعتمد، وإلا قرأها مطوّر لاحق كالقائمة الكاملة |
+| **ق-2** | **`periods/{pk}` تشترط وجود `householdExpenseMinor`** (`isNonNegMoney(...)` + `<= totalExpenseMinor`)، و§12.1 في النواة لا تكتب الحقل إلا للقيود الموسومة `household` | **أول مصروف غير منزلي في كل شهر يُرفَض** — أكثر العمليات شيوعاً | **⚠️ التقاء مؤكَّد، والحلّ في طبقتي:** `04-security.md` فصل `create` عن `update` (فأزال خطأ التقييم)، لكنه **ما زال يشترط حضور الحقل في `create`**. ⇒ **ADR-034 ليس تحسيناً بل شرط صحة:** مُشفِّر `periodDelta` في `data/ledger/writers` **يكتب دائماً مجموعة الحقول العددية كاملة** بـ `increment(0)` لغير المتأثر. **بدونه ترفض القواعد أول عملية في كل شهر** |
+| **ق-3** | ترتيب `||` في `accountPeriods` يُقيَّم خطأً عند الإنشاء (`resource.data` على مستند غير موجود) | أول حركة على أي (حساب، شهر) تُرفَض | **✅ مُعالَجة:** `04-security.md` فصل `allow create` عن `allow update` ⇒ لا وصول إلى `resource` في مسار الإنشاء |
+| **ق-4** | نفس العيب في `obligations` (`resource.data.keys()` على `create`) | إنشاء أي التزام يُرفَض | **✅ مُعالَجة** بنفس الفصل |
+| **ق-5** | **`accounts` مسار تحديث واحد يشترط `balanceVersion > resource.data.balanceVersion`** ويفرض `balanceMinor` مشتقاً. فتعديل **غير مالي** (`name`, `sortOrder`, `icon`, `colorToken`, `notes`) يُجبَر على تقديم `balanceVersion` | تعديل اسم حساب **يُلوِّث عدّاداً دلالته «تغيّر الرصيد»** ⇒ يفقد `balanceVersion` قيمته في كشف التحديثات المفقودة (النواة §4.2)، وهي الوظيفة الوحيدة التي بُرِّر بها الحقل | **❌ ما زالت قائمة في `04-security.md` (السطر ~729).** المقترح: مساران منفصلان — مسار وصفي بـ `touchedOnly(['name','nameLower','sortOrder','icon','colorToken','notes','updatedAt'])` **بلا** شرط `balanceVersion` ولا شرط I3، ومسار مالي بالشروط الكاملة الحالية. **أرفعه لوحدة الأمان** |
+| **ق-6** | `attachments` مؤجَّلة (ق-1) لكن الحقل في المخطط | لا أثر الآن (الواجهة معطَّلة) | **✅ `04-security.md` يحتوي `match /attachments`** — يبقى التأكّد أنه بمنع كامل حتى Blaze |
+
+**ملاحظة منهجية تبقى صالحة ومهمة:** ق-2 وق-3 وق-4 كانت من **نمط واحد**: الوصول إلى
+`resource.data` في قاعدة تخدم `create` و`update` معاً، وهو خطأ **تقييم** لا خطأ منطق — فترفض
+القواعد العملية برسالة لا تشرح شيئاً. ولأن النمط متكرر، أقترح على وحدة الأمان **فحصاً جدولياً
+إلزامياً:** لكل مجموعة، اختبار `create` على مستند **غير موجود** واختبار `update` على مستند قائم.
+وهذا يطابق `tests/rules/**` في §5.1، وأُدرجه في `tests/rules/periods.rules.test.ts` تحديداً
+لأن ق-2 يمسّ أكثر العمليات تكراراً.
+
+### 14.3 ثغرة في النواة تخصّ الواجهة
+
+| # | الثغرة | المقترح |
+|---|---|---|
+| **ن-1** | النواة §23 تُعرِّف `selectors` وتذكر `monthIncomeMinor` وغيرها، لكنها **لا تحدّد سياسة عرض عند فشل القراءة أو قِدَم الكاش**. وهذا أثر مباشر على «لا شاشة بلا مصدر بيانات» (§25 بند 5) | **§8.4 و§9.3 في هذه الوثيقة يملآن الفراغ:** فشل فكّ ترميز إسقاط مالي = حاجب؛ وكل رقم مالي يحمل حالة نضارة. **يُرفَع للمالك في §16.2 سؤال 3** |
+| **ن-2** | النواة ADR-007 تنصّ على استبعاد `pendingCommands` من كل رصيد وتقرير، ولا تحدّد **كيف تُعرَض** إن تجاوزت العشرات بعد انقطاع طويل | طابور مُرقَّم بشاشة مستقلة (`features/transactions/components/PendingSyncList`) مع عدّاد في الشريط العلوي، وتفريغ تسلسلي بشريط تقدّم. ولا عرض لمبالغها مجموعةً — **عدد فقط** حتى لا يُقرأ كرصيد |
+| **ن-3** | النواة §20 تُلزم باختبار «التصفح على الهاتف والحاسوب» و«اللغة العربية واتجاه RTL» دون تحديد الأداة | `tests/e2e/responsive.spec.ts` و`rtl-a11y.spec.ts` بـ Playwright + axe على مقاسَي `Pixel 7` و`1440×900` (§12.5) |
+
+---
+
+## 15. مصفوفة تتبّع المتطلبات
+
+**كل قسم في `00-REQUIREMENTS.md` ⇒ أين يُنفَّذ في هذه المعمارية.**
+
+| § | المتطلب | الميزة | المنطق | البيانات |
+|---|---|---|---|---|
+| 1 | الرؤية: عملية واحدة تنعكس في كل مكان | — | `domain/ops/plan.ts` + معاملة ذرّية | `data/ledger/postOperation` |
+| 2 | البنية التقنية وفصل المنطق | — | ADR-023 · §4 (الطبقات) | §4.3 |
+| 3 | الهوية البصرية و RTL والسمات | `ui/**` | §13.1–13.2 | — |
+| 4 | لوحة التحكم | `features/dashboard` | `domain/selectors/dashboard.ts` | `qk.accounts` · `qk.period` · `qk.budgetPeriod` |
+| 5 | الحسابات والأرصدة والتحويل | `features/accounts` | `domain/ledger/balances.ts` · `ops/plans/transfer` | `accountRepo` |
+| 6 | المصروفات والفئات والتكرار | `features/transactions` · `features/categories` | `ops/plans/expense` · `recurrence/**` | `entryRepo` · `categoryRepo` · `recurrenceRepo` |
+| 7 | الدخل والمتوقَّع مقابل المستلم | `features/transactions` | `ops/plans/income` | `entryRepo` · `incomeSchedules` |
+| 8 | الالتزامات والسداد الجزئي والتنبيهات | `features/obligations` | `ops/plans/payObligation` · `rules/status.ts` | `obligationRepo` |
+| 9 | الديون عليّ | `features/debts/payable` | `ops/plans/payDebt` | `debtRepo` |
+| 10 | الديون لي والمتابعات | `features/debts/receivable` | `ops/plans/collectDebt` · `writeOffDebt` | `debtRepo` + `followUps` |
+| 11 | مصاريف المنزل بلا ازدواج | `features/household` | `selectors/household.ts` (مجموع فرعي) | **نفس القيود — استعلام مُصفّى** |
+| 12 | الميزانيات والأهداف والتوقعات | `features/budgets` · `goals` · `planning` | `selectors/budget.ts` · `goals.ts` | `budgetRepo` · `goalRepo` |
+| 13 | المفكرة | `features/notes` | `domain/notes/search.ts` | `noteRepo` — **تحتاج قاعدة أمان (§14.2 ق-1)** |
+| 14 | المهام والتذكيرات | `features/tasks` | `domain/tasks/recurring.ts` · `rules/status.ts` | `taskRepo` — **تحتاج قاعدة أمان** |
+| 15 | العبادات والزكاة | `features/worship` | `domain/worship/**` (`mulRate` بـ BigInt) | `worshipRepo` · `zakatRepo` — **تحتاج قاعدة أمان** |
+| 16 | التقارير والتصدير | `features/reports` | `domain/reports/**` | `aggregateRepo` (`sum`/`count`) |
+| 17 | التنبيهات الذكية بلا تكرار | `features/notifications` | `domain/notify/{generate,dedupe}.ts` | `notificationRepo` |
+| 18 | مخطط قاعدة البيانات والثوابت | — | **النواة §4 و§13** | `data/codecs/**` (فحص الثوابت عند القراءة §8.3) |
+| 19 | قواعد الأعمال والمحاسبة | — | **النواة §9 (R1…R11)** | — |
+| 20 | الأمن والخصوصية والنسخ | `features/backup` · `integrity` | §10.1 (المفاتيح) · §11.2 (الجلسات) | `firestore.rules` · `data/export/**` |
+| 21 | الإعدادات الشخصية | `features/settings` | `domain/contracts/settings.ts` | `settingsRepo` |
+| 22 | الأداء والمزامنة ودون اتصال | — | §13.4 · §9 | `data/live/**` · `data/outbox/**` |
+| 23 | الاختبارات | — | §12.1 | `tests/**` |
+| 24 | خطة التنفيذ بالمراحل | — | **هذه الوثيقة = المرحلة 1 (التحليل والتأسيس)** | — |
+| 25 | التعليمات التنفيذية الإلزامية | — | §2 (فحص القائم) · §4.4 (لا تكرار منطق) · §7 (لا إخفاء أخطاء) · §10.1 (لا أسرار) | — |
+| 26 | المخرجات المطلوبة | — | هذه الوثيقة + `docs/design/03,04,05` + `docs/ops/**` | — |
+
+**ثلاث فجوات معلنة في التغطية** (لا شيء منها خفيّ):
+
+1. **الوحدات §13 و§14 و§15 لا قواعد أمان لها** في النواة §14.3 ⇒ غير قابلة للكتابة حتى تُضاف
+   (§14.2 ق-1). **الكود لا يُكتب لها قبل ذلك**، وإلا بُنيت شاشات ترفض الحفظ.
+2. **المرفقات (§6 و§18)** مؤجَّلة بق-1: الحقل في المخطط والواجهة معطَّلة بوسم «يتطلب ترقية».
+3. **مواقيت الصلاة (§15 بند 1)** مؤجَّلة: المتطلبات نفسها تمنع «أوقات ثابتة أو تقديرية غير
+   موثوقة»، وحسابها يحتاج مصدراً موثوقاً أو مكتبة فلكية — قرار مستقل لا يدخل المعمارية.
+
+---
+
+## 16. فهرس ADR وما بقي للمالك
+
+### 16.1 سجل القرارات المعمارية — تكملة لترقيم النواة
+
+تُنشأ كملفات مستقلة في `docs/adr/ADR-0NN-*.md`، كل واحد بالسياق والقرار والبدائل المرفوضة
+والنتائج و«كيف نعرف أننا أخطأنا».
+
+| # | القرار | القسم | الحالة |
+|---|---|---|---|
+| ADR-023 | **Vite 8 + React 19 + TS 6 كـ SPA**؛ رفض Next.js بـ SSR و`export` و Remix و TanStack Start | §3 | **معتمد** |
+| ADR-024 | **سبع طبقات** `app → features → {stores, data, ui} → domain → lib` بمصفوفة استيراد صريحة | §4.1–4.2 | **معتمد** |
+| ADR-025 | الفرض بقواعد ESLint الأصلية + `verify-layers.mjs`؛ **رفض `eslint-plugin-boundaries`** لثغرات اعتمادياتها | §4.4 | **معتمد** — يُثبِّت انحراف ADR-018 |
+| ADR-026 | TanStack Query للخادم + Zustand للمحلي؛ رفض Redux و XState | §6.1 | **معتمد** |
+| ADR-027 | **سجل اشتراكات حيّة بعدّاد مراجع** ومهلة سماح 30ث، يكتب بـ `setQueryData` | §6.4–6.5 | **معتمد** |
+| ADR-028 | `AppError` مغلّف واحد بـ `messageAr`، والتحويل **نقي في `domain/errors`** | §7.2–7.3 | **معتمد** |
+| ADR-029 | **Zod على حدّين**؛ المخططات في `domain/contracts` مشتركة؛ مخطط قراءة متسامح + صارم | §8 | **معتمد** |
+| ADR-030 | **`persistentLocalCache` + `persistentMultipleTabManager` + سقف 40MB**؛ والكتابة لا تقرأ الكاش أبداً | §9.2–9.3 | **معتمد** |
+| ADR-031 | عامل خدمة للقوقعة فقط، **`runtimeCaching: []`**، وتحديث قسري عند `schemaAhead` | §9.4 | **معتمد** |
+| ADR-032 | `apiKey` ليس سرّاً **ويجب تقييده**؛ التحقق من البيئة بـ Zod وفشل سريع؛ UID في القواعد لا في البيئة | §10 | **معتمد** |
+| ADR-033 | **`Africa/Tripoli` ثابتاً** لـ `DateKey`/`periodKey` — تضييق لنص النواة §4.3 | §11.5 | **معتمد مع رفع للمالك** |
+| ADR-034 | **`periods` و`accountPeriods` تُكتبان بمجموعة الحقول العددية كاملة** (`increment(0)` لغير المتأثر) | §14.2 ق-2 | **معتمد** |
+| ADR-035 | خط عربي مستضاف محلياً بأرقام جدولية؛ لا Google Fonts | §13.1 | **معتمد** |
+| ADR-036 | طوبولوجيا الاختبار بأربعة مشاريع Vitest + Playwright على المحاكي حصراً | §12.1 · §12.5 | **معتمد** |
+| ADR-037 | بوابة `verify` واحدة محلياً و CI؛ **النشر يدوي ببيئة محمية**؛ القواعد تُنشر وحدها | §12.6 | **معتمد** |
+| ADR-038 | **تسلسل الإقلاع والبوابات الست** بترتيب مُلزِم، ثم مهام ما بعد الإقلاع | §11.4 | **معتمد** |
+| ADR-039 | **لا مبالغ في المتاجر المحلية** (B14) | §6.1 | **معتمد** |
+| ADR-040 | `react-router` كموجِّه متصفح بـ `lazy`، **بلا `loader` يجلب بيانات** | §11.1 | **معتمد** |
+
+### 16.2 ما بقي يحتاج قرار المالك
+
+| # | السؤال | الأثر |
+|---|---|---|
+| **1** | **تثبيت التاريخ المحاسبي على توقيت طرابلس (UTC+2) بدل توقيت الجهاز** (ADR-033). النتيجة: سجلتَ عملية من خارج ليبيا، فالتاريخ المحاسبي يبقى بتوقيت ليبيا لا بتوقيتك المحلي. البديل (توقيت الجهاز) يُنتج ملخّصين شهريين مختلفين لنفس العملية بين جهازين — وهو ما أرفضه هندسياً | يمسّ `bookedAt` و`periodKey` على قيود **غير قابلة للتغيير**. **القرار قبل أول قيد، لا بعده** |
+| **2** | **مصير الوحدات غير المالية بلا قواعد أمان** (§14.2 ق-1): المفكرة (§13)، المهام (§14)، العبادات (§15). أُوقف بناء شاشاتها حتى تُضاف القواعد، أم تُبنى بالتوازي على أن تُنشر القواعد قبل التسليم؟ | أربع وحدات من المتطلبات. موقفي: **لا كود قبل القواعد** — شاشة ترفض الحفظ أسوأ من شاشة غير موجودة |
+| **3** | **سياسة فشل فكّ ترميز مستند مالي** (§8.4): مستند تالف واحد **يُعطِّل تسجيل العمليات** حتى إعادة البناء. البديل (الاستمرار واستبعاد التالف) **أرفضه** لأنه يعرض رقماً خاطئاً بثقة | يحدد سلوك التطبيق في أسوأ الحالات. أوصي بالتعطيل الصارم |
+| **4** | **عمق سجل الأخطاء ومحتواه** (§7.6): 300 مُدخَل محلي **يحتوي مبالغ ومعرّفات** (لازمة للتشخيص). مقبول؟ أم بلا مبالغ مع تشخيص أضعف؟ | يمسّ الخصوصية عند مشاركة ملف السجل |
+| **5** | **التحديث القسري عند تقدّم نسخة البيانات** (§9.4): شاشة غير قابلة للتجاهل تُعيد التحميل تلقائياً. البديل (مطالبة قابلة للتجاهل) يُبقي جهازاً يعرض شاشات تعمل وأزراراً ترفض | تجربة الاستخدام عند النشر من جهاز ثانٍ |
+| **6** | **حذف الملاحظات والمهام:** كل المجموعات المالية `delete: if false`. هل تُسمح بالحذف الفعلي للملاحظات والمهام، أم الأرشفة فقط اتساقاً مع بقية النظام؟ | يمسّ قواعد الأمان وواجهتَي §13 و§14 |
+| **7** | **ميزانية الأداء كبوابة:** يفشل CI عند LCP > 2.5s، أم تحذير فقط في الإصدار الأول؟ | صرامة CI |
+
+---
+
+## 17. خلاصة العقد المعماري
+
+1. **SPA بـ Vite + React 19 + TS**، ينشر ملفات ساكنة؛ لا خادم، ولا SSR بلا قيمة (ADR-023).
+2. **سبع طبقات باتجاه واحد**، `domain` نقية و`data` وحدها تلمس Firestore، والحدود **مفروضة
+   بأداة البناء** بستة عشر قاعدة لا بمراجعة الكود.
+3. **TanStack Query للخادم، Zustand للمحلي، ولا مبلغ في متجر محلي.**
+4. **اشتراك حيّ واحد لكل مفتاح** بعدّاد مراجع ومهلة سماح — يقتل الازدواج والتسريب و`StrictMode`.
+5. **`AppError` واحد** برسالة عربية جاهزة، ولكل صنف خطأ **قناة عرض واحدة**، وكل خطأ يُسجَّل.
+6. **Zod على حدّين فقط**، بمخططات مشتركة، وفحص الثوابت I3/I5/I6/I22 **عند القراءة أيضاً**.
+7. **الكاش الدائم مُفعَّل بأمان**، لأن كل قرار مالي داخل `runTransaction` خادمي حتماً؛
+   والخطر الوحيد (عرض رقم قديم) يُعالَج بوسم نضارة على **كل** رقم مالي.
+8. **لا تحديث متفائل لأي رقم مالي**، ولا تخزين مؤقت لبيانات Firestore في عامل الخدمة.
+9. **`apiKey` ليس سرّاً ومقيَّد؛ والإغلاق على UID المالك في القواعد لا في الواجهة.**
+10. **بوابات إقلاع ست بترتيب مُلزِم**، وبوابة `verify` واحدة محلياً و CI، ونشر يدوي بموافقة.
+
+> **هذه الوثيقة تخدم النواة المحاسبية ولا تنافسها.** أي تعارض بينهما = عيب في هذه الوثيقة
+> يُصلَح لصالح النواة. وأي تغيير هنا يحتاج ADR جديداً.

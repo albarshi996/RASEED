@@ -1,0 +1,61 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/*
+ * الأساس العام.
+ * الخط العربي يُحمَّل محليًا لاحقًا (ملف woff2 في public/fonts) بدل Google Fonts:
+ * الاعتماد على شبكة خارجية في تطبيق مالي شخصي يعني وميض نص بلا خط عند ضعف الاتصال،
+ * وتسريب زيارة لكل فتح. حتى ذلك الحين يتدرّج الخط إلى خط النظام.
+ */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--surface-page);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-feature-settings: 'ss01';
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;
+  }
+
+  /*
+   * الأرقام جدولية في كل مكان يحمل مالًا (ق-3).
+   * بلا هذا تتذبذب عروض الخانات فتبدو أعمدة المبالغ مكسورة.
+   */
+  .tabular,
+  table,
+  [data-money] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* المبالغ لاتينية الاتجاه دائمًا داخل نص عربي (ق-3). */
+  [data-money] {
+    direction: ltr;
+    unicode-bidi: isolate;
+    display: inline-block;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* احترام تقليل الحركة — إمكانية وصول لا خيار. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

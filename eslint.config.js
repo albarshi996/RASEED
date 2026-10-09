@@ -22,9 +22,22 @@ import tseslint from 'typescript-eslint'
  * هي المكان الوحيد الذي يبني lines و side (عقد النواة §1.1).
  */
 
-/** @param {string[]} patterns @param {string} message */
-const forbid = (patterns, message) => ({
-  'no-restricted-imports': ['error', { patterns: patterns.map((group) => ({ group: [group], message })) }],
+/**
+ * أنماط no-restricted-imports تُطابَق بدلالات gitignore لا minimatch المثبّت:
+ * النمط 'firebase/*' يطابق أي مسار يحوي المقطع، ومنه '@/data/firebase/auth' المشروع تمامًا.
+ * لذلك تُستخدم regex مثبَّتة على بداية اسم الوحدة.
+ * @param {string[]} specs @param {string} message
+ */
+const forbid = (specs, message) => ({
+  'no-restricted-imports': [
+    'error',
+    {
+      patterns: specs.map((s) => ({
+        regex: '^' + s.replaceAll('/', '\\/').replaceAll('.', '\\.') + '(\\/|$)',
+        message,
+      })),
+    },
+  ],
 })
 
 export default tseslint.config(
@@ -107,7 +120,7 @@ export default tseslint.config(
   {
     files: ['src/data/**/*.{ts,tsx}'],
     rules: forbid(
-      ['@/features', '@/features/*', '@/ui', '@/ui/*', '@/app', '@/app/*'],
+      ['@/features', '@/ui', '@/app'],
       'طبقة data لا تستورد من الواجهات. الاتجاه دائمًا features → data، لا العكس.',
     ),
   },
@@ -137,7 +150,7 @@ export default tseslint.config(
   {
     files: ['src/features/**/*.{ts,tsx}'],
     rules: forbid(
-      ['firebase', 'firebase/*', '@firebase/*'],
+      ['firebase', '@firebase'],
       'الشاشات لا تستورد firebase مباشرة. كل وصول للبيانات يمرّ عبر @/data.',
     ),
   },

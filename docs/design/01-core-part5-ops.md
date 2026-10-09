@@ -1292,7 +1292,7 @@ export async function reconcileObligation(
 > الترحيل **بطيء عند القراءة** (lazy read-time) وللمستندات **المشتقّة فقط**.
 
 **لماذا:** هذه المجموعات غير قابلة للتعديل بقرار معماري وبقواعد الخادم (14.2). أي ترحيل عليها يعني
-إمّا نقض عدم القابلية للتعديل (⇒ انهيار I13 وكل ضمانات التدقيق)، أو مسحاً كاملاً بـ 14,000 قراءة
+إمّا نقض عدم القابلية للتعديل (⇒ انهيار I30 وكل ضمانات التدقيق)، أو مسحاً كاملاً بـ 14,000 قراءة
 و14,000 كتابة (⇒ 28% و70% من الحصة لإصدار واحد). **كلاهما مرفوض.**
 الثمن المقبول بدلاً عنه: **القارئ يحمل معالجاً لكل إصدار سابق، إلى الأبد.**
 
@@ -1439,9 +1439,9 @@ export function migrateDoc<T>(raw: Record<string, unknown>): MigrateResult<T> {
 | 1 | **لا فرض خادمي للثوابت العرضية** (ADR-020) | القواعد تحمي شكل كل مستند وثوابته الداخلية، ولا تحمي: ميزان المراجعة، صحة المُجمَّعات، اكتمال الـ batch، تطابق `postings` مع `lines`. عميل مُعطوب أو متصفّح يُقتل أثناء الـ commit قد يُنتج انحرافاً لا يمنعه الخادم | عند **مستخدم ثانٍ** (زوجة/شريك/محاسب) — فحينها «العميل الوحيد موثوق» تسقط فوراً. أو عند أول انحراف حقيقي غير مُفسَّر | **Blaze + Cloud Functions**: كتابة مالية عبر `httpsCallable` واحدة، والقواعد تمنع الكتابة المباشرة على `journalEntries`/`accounts` من العميل تماماً |
 | 2 | **العميل موثوق في الحسابات** | كل اتجاه مدين/دائن، وكل مبلغ سطر، وكل دلتا تشغيلية، تُحسب في متصفّح المالك. خطأ برمجي في `planOperation` يُنتج **قيداً متوازناً وصحيح الشكل ومقبولاً من الخادم ورقمه خاطئ** | عند أول تقرير يُستخدم في قرار حقيقي (قرض، إيجار، زكاة) ويظهر خطؤه | **Blaze**: نفس `planOperation` تُشغَّل على الخادم كمصدر وحيد. حتى ذلك الحين: الحماية **اختبارية** (القسم 20) + `reconcileAccount` |
 | 3 | **لا عمل مالي دون اتصال** (ADR-007) | `runTransaction` لا تعمل دون اتصال — تفشل أو تتعلّق. فالمالك في منطقة بلا شبكة **لا يستطيع تسجيل مصروف فوراً**؛ يُحفظ في `pendingCommands` ويظهر بوسم «معلّق» و**لا يدخل أي رصيد ولا تقرير** | إن أصبح الاستخدام الأساسي ميدانياً بلا شبكة (سفر طويل، سوق) فتراكم 20 أمراً معلّقاً يُفقد الثقة بالرصيد المعروض | **لا يحلّه Blaze.** قيد في Firestore SDK نفسه. البديل الحقيقي: دفتر محلي كامل (IndexedDB) بمزامنة ودمج تعارضات — **إعادة بناء للنواة** لا تفعيل ميزة. مرفوض حالياً بوعي |
-| 4 | **لا مرفقات ولا صور إيصالات** (ق-1) | حقل `attachmentIds` موجود في المخطط والواجهة معطَّلة بوسم «يتطلب ترقية». لا إثبات سداد مرفق بدفعة دين (§9 يطلبه نصّاً)، ولا صورة فاتورة | عند أول خلاف فعلي على سداد دين يحتاج إثباتاً | **Blaze + Firebase Storage** عبر `StoragePort` الجاهز (ق-1). تفعيل، لا إعادة بناء |
+| 4 | **لا مرفقات ولا صور إيصالات** (ق-1) | حقل `attachments` موجود في المخطط على القيد والالتزام والدين، والواجهة معطَّلة بوسم «يتطلب ترقية». لا إثبات سداد مرفق بدفعة دين (§9 يطلبه نصّاً)، ولا صورة فاتورة | عند أول خلاف فعلي على سداد دين يحتاج إثباتاً | **Blaze + Firebase Storage** عبر `StoragePort` الجاهز (ق-1). تفعيل، لا إعادة بناء |
 | 5 | **لا إشعارات والتطبيق مغلق** (ق-1) | التنبيهات (التزام يستحق، دين تأخر) تظهر **فقط عند فتح التطبيق**. التزام استحق أمس ولم يُفتح التطبيق = **لا تنبيه**. §17 يطلب مركز تنبيهات، و§8 يطلب تنبيهاً «قبل الاستحقاق وفي يومه وبعد التأخر» — **الثالث يعمل دائماً، والأولان يعتمدان على الفتح** | عند تفويت التزام فعلي بسبب عدم الفتح | **Blaze + FCM خادمي** عبر `PushPort`. الحل الجزئي الحالي: Web Notifications والتطبيق مفتوح + ملخّص «ما فاتك» بارز عند كل فتح |
-| 6 | **خطأ الاتجاه (Dr/Cr معكوسان) لا يكشفه أي ثابت** | قيد معكوس الاتجاه **متوازن تماماً** (I1 يمرّ)، وشكله صحيح (القواعد تمرّ)، ومُجمَّعاته متّسقة (I5، I6 تمرّ)، وميزان المراجعة سليم (I4 يمرّ). **يظهر فقط كرقم غريب في تقرير** | هو غير مقبول **الآن** إن كانت تغطية الاختبارات الجدولية ناقصة. لهذا القسم 20 يُلزم باختبار جدولي لكل سطر في جدول القسم 9 | لا شيء يحلّه بنيوياً — **لا ترقية ولا تصميم**. الحماية الوحيدة: اختبار جدولي شامل + مراجعة بصرية لكل سطر. **أصدق بند في هذه الوثيقة** |
+| 6 | **خطأ الاتجاه (Dr/Cr معكوسان) لا يكشفه أي ثابت** | قيد معكوس الاتجاه **متوازن تماماً** (I1 يمرّ)، وشكله صحيح (القواعد تمرّ)، ومُجمَّعاته متّسقة (I4، I5 تمرّان)، وميزان المراجعة سليم (I2 يمرّ). **يظهر فقط كرقم غريب في تقرير** | هو غير مقبول **الآن** إن كانت تغطية الاختبارات الجدولية ناقصة. لهذا القسم 20 يُلزم باختبار جدولي لكل سطر في جدول القسم 9 | لا شيء يحلّه بنيوياً — **لا ترقية ولا تصميم**. الحماية الوحيدة: اختبار جدولي شامل + مراجعة بصرية لكل سطر. **أصدق بند في هذه الوثيقة** |
 | 7 | **الانحراف لا يُكتشف إلا بالفاحص الدوري** | بين كتابة خاطئة وفحص اليوم التالي، كل رقم على كل شاشة قد يكون خاطئاً، والمالك يراه صحيحاً | إن أصبح الفحص اليومي يفشل بصمت (دون اتصال مثلاً) لأسبوع | **Blaze**: `onWrite` trigger يفحص بعد كل كتابة. حالياً: `runLedgerHealthCheck` يومياً (16.2) + وضوح «تعذّر الفحص» لا «سليم» |
 | 8 | **لا نسخ احتياطي تلقائي** (ق-1) | النسخة الاحتياطية الوحيدة = **تصدير JSON يدوي** يبدأه المالك. لا تصدير = لا نسخة | هو غير مقبول **الآن** إن لم يُنفَّذ التصدير فعلاً. لذلك ق-1 يُلزم بتذكير دوري داخل التطبيق، والتصدير ميزة مرحلة أولى لا تأجيل | **Blaze + Scheduled Export إلى GCS**. حالياً: تذكير بارز إن مضى > 14 يوماً على آخر تصدير |
 | 9 | **لا جدولة خادمية** (ق-1، ADR-013) | المصروفات والالتزامات المتكررة تُولَّد **عند فتح التطبيق** عبر مُشغِّل الاستدراك. غياب شهر ⇒ عند الفتح تُولَّد الدورات الفائتة دفعة واحدة. سقف الاستدراك `maxBackfillDays` يمنع فيضاناً، وما قبله يُعرض قائمة اختيار | إن أصبح التطبيق يُفتح أقل من مرة شهرياً، فـ «الالتزامات القادمة» تفقد معناها | **Blaze + Scheduled Functions** عبر `SchedulerPort`. مفتاح idempotency حتمي (`rec:{id}:{occurrenceKey}`) يجعل التبديل آمناً |
@@ -1450,7 +1450,7 @@ export function migrateDoc<T>(raw: Record<string, unknown>): MigrateResult<T> {
 | 12 | **المنطقة الزمنية ثابتة UTC+2 بلا توقيت صيفي** | `bookedAt` تُحسب بتوقيت ليبيا دائماً. المالك في منطقة أخرى (UTC+5 مثلاً) يسجّل مصروفاً الساعة 1 صباحاً ⇒ يُنسب إلى **اليوم السابق** بتوقيت ليبيا ⇒ وقد ينتقل إلى **شهر سابق** في `periodKey` ليلة 1 الشهر | عند إقامة طويلة خارج ليبيا | إعداد منطقة زمنية صريح. مؤجَّل بوعي: ليبيا بلا توقيت صيفي يجعل `UTC+2` ثابتاً دقيقاً، وإضافة الإعداد تُدخل تعقيداً في `periodKey` بلا حاجة حالية |
 | 13 | **فقدان حساب Google = فقدان كل البيانات** (ق-2) | مزوّد وحيد، وقائمة UIDs في القواعد. فقدان الحساب ⇒ لا استعادة من داخل النظام | هو خطر قائم **الآن**. التخفيف المُلزِم: تصدير JSON دوري + 2FA على حساب Google + توثيق إجراء إضافة UID احتياطي | UID احتياطي مُفعَّل في `approvedUids()` (قرار مفتوح — 22 بند م-3) |
 | 14 | **تكلفة الرسم السنوي** | رسم «12 شهراً» يقرأ ~144 مستند `accountPeriods` في أول تحميل | إن تجاوزت شجرة الحسابات 40 حساب مصروف/دخل ورقياً | مستند إسقاط شهري مُجمَّع واحد — مؤجَّل لأن 144 قراءة = 0.3% من الحصة |
-| 15 | **لا إقفال فترات** | لا يمنع شيء تسجيل قيد بتاريخ قبل سنتين، فيغيّر تقريراً صُدِّر سابقاً | عند استخدام التقارير خارجياً (محاسب، جهة رسمية) | مجموعة `periodLocks` + شرط `!exists(periodLock)` في قاعدة الإنشاء. **بنية جاهزة، قرار مفتوح** (22 بند م-5) |
+| 15 | **إقفال الفترات مفروض في العميل لا في الخادم** | `settings.lockedPeriods` موجودة والحارس G9 يرفض القيد داخل فترة مُقفلة، **لكن القاعدة لا تقرأ القائمة**: هي تمنع تقصيرها فقط (14.3 بند 19). عميل مُعطوب يستطيع الكتابة في فترة مُقفلة | عند استخدام التقارير خارجياً (محاسب، جهة رسمية) | `get()` ثانية على `settings/general` في قاعدة إنشاء القيد ⇒ +1 قراءة مفوترة لكل عملية. **قرار مفتوح** (22.2 بند م-4) |
 | 16 | **لا تدقيق على القراءة** | `auditLogs` يسجّل التعديلات المالية فقط. لا سجل لمن قرأ ماذا | عند تعدد المستخدمين فقط | تدقيق القراءة يحتاج خادماً ⇒ **Blaze** |
 
 ### 18.2 ما **ليس** قصوراً — وإن بدا كذلك
@@ -1557,7 +1557,7 @@ tests/
 | `installments/build-plan.test.ts` | `buildInstallmentPlan sums to the total and loads remainder on the first` | القرار 2.6/1 |
 | | `buildInstallmentPlan clamps 31st to end of february` | `clampToEndOfMonth` |
 | | `buildInstallmentPlan stores amounts explicitly` | القرار 2.6/2 |
-| `period/period-key.test.ts` | `periodKeyOf always equals bookedAt slice 0..7` | **ADR-008 / I7** |
+| `period/period-key.test.ts` | `periodKeyOf always equals bookedAt slice 0..7` | **ADR-008 / I13 / G5** |
 | | `periodKeyOf is unaffected by financialMonthStartDay` | ADR-008: الإعداد عدسة عرض |
 | | `todayLibya returns UTC+2 date with no DST shift` | المنطقة ثابتة |
 | `plan/expense.test.ts` | `planExpense debits the expense account and credits the cash account` | اتجاه القيد (القصور 6) |
@@ -1571,17 +1571,17 @@ tests/
 | `plan/reversal.test.ts` | `planReversal flips every side and carries no classification` | القسم 1.2 حجة 2 |
 | | `planReversal of a reversal is rejected` | لا سلاسل عكس |
 | `plan/amend.test.ts` | `planAmend emits a reversal and a replacement with a net delta` | ADR-006 |
-| `plan/balance-guard.test.ts` | `plan is rejected when the resulting balance drops below minBalanceMinor` | **I21** |
+| `plan/balance-guard.test.ts` | `plan is rejected when the resulting balance drops below minBalanceMinor` | **G10** |
 | | `a signed minBalanceMinor of -500000 allows an overdraft to exactly that point` | **ADR-010** |
 | `plan/earmark-guard.test.ts` | `exceeding earmarkedMinor yields a warning not a rejection` | **ADR-017** |
 | | `exceeding the balance yields a rejection not a warning` | ADR-017 |
-| `plan/over-settle-guard.test.ts` | `paying more than totalMinor plus extraChargesMinor is rejected` | **I17** |
-| `plan/balanced.test.ts` | `every plan in the operations table is balanced` | **I1** جدولياً على كل نوع عملية |
-| `plan/line-count.test.ts` | `every plan has at least two lines with positive integer amounts` | **I2** |
+| `plan/over-settle-guard.test.ts` | `paying more than totalMinor plus extraChargesMinor is rejected` | **I9 / G11** |
+| `plan/balanced.test.ts` | `every plan in the operations table is balanced` | **I1 / G12** جدولياً على كل نوع عملية |
+| `plan/line-count.test.ts` | `every plan has at least two lines with positive integer amounts` | **I1 / I21 / I22** |
 | `recurring/catch-up.test.ts` | `planCatchUp produces one deterministic opId per missed occurrence` | **ADR-013** |
 | | `planCatchUp caps at maxBackfillDays and reports the rest for manual selection` | حد الاستدراك |
 | | `a payment request never produces a catch-up item` | **ADR-013 / العيب 3** |
-| `reconcile/judge-account.test.ts` | `judgeAccount reports drift when stored totals differ from the ledger` | I6 |
+| `reconcile/judge-account.test.ts` | `judgeAccount reports drift when stored totals differ from the ledger` | I5 |
 | `reconcile/judge-ledger.test.ts` | `judgeLedger returns unbalancedLedger not projectionDrift when sums differ` | **16.2** — التمييز بين الحالتين |
 | | `judgeLedger never returns clean while offline` | 16.1 الثقب المعلن |
 | `ports/every-port-has-disabled-impl.test.ts` | `every Port exposes a Disabled implementation returning requiresBlaze` | **ق-1 / 18.3** |
@@ -1592,26 +1592,27 @@ tests/
 |---|---|---|
 | `post-expense.test.ts` | `posting an expense writes exactly 8 documents` | **15.2 كعقد لا كتقدير** |
 | | `posting an expense moves the cash balance by exactly the amount` | الأثر |
-| | `posting an expense creates two postings mirroring the entry lines` | I24 |
-| | `the written accountPeriods doc holds movement only and no balance keys` | **ADR-009 / I8** |
-| `idempotency.test.ts` | `replaying the same opId writes zero documents and reports alreadyApplied` | **ADR-004 / I10** |
-| | `the same opId with a different payloadHash is rejected with OP_CONFLICT` | **I11** |
+| | `posting an expense creates two postings mirroring the entry lines` | I11 |
+| | `the written accountPeriods doc holds movement only and no balance keys` | **ADR-009 / I4** |
+| `idempotency.test.ts` | `replaying the same opId writes zero documents and reports alreadyApplied` | **ADR-004 / I23 / G6** |
+| | `the same opId with a different payloadHash is rejected with OP_ID_CONFLICT` | **I24 / G6** |
 | | `a retried transaction produces the same postingIds` | 19 عيب 9 |
 | `transfer.test.ts` | `a transfer leaves the sum of all asset balances unchanged` | القاعدة 19.3 |
 | | `a transfer appears in no income or expense report query` | **القسم 1.2 حجة 1** |
-| `obligation-payment.test.ts` | `a partial payment updates paidMinor and remainingMinor in the same transaction` | I17 |
+| `obligation-payment.test.ts` | `a partial payment updates paidMinor and remainingMinor in the same transaction` | I5 / I27 |
 | | `the full payment sequence lands on status paid exactly once` | آلة الحالة |
-| | `obligation paidMinor equals the sum of settlementDeltaMinor on postings` | **ADR-021 / I20** |
+| | `obligation paidMinor equals the sum of settlementDeltaMinor on postings` | **ADR-021 / I6** |
 | | `financing-payment-touches-no-expense-account` | **ADR-011 / العيب 4** |
-| `obligation-extra-charges.test.ts` | `a late fee raises extraChargesMinor and leaves totalMinor untouched` | **ADR-012 / I18** |
+| `obligation-extra-charges.test.ts` | `a late fee raises extraChargesMinor and leaves totalMinor untouched` | **ADR-012 / I10** |
 | `debt-settlement.test.ts` | `collecting a receivable raises the cash balance and lowers remainingMinor` | القاعدة 19.5 |
 | | `registering a debt with no cash movement leaves every balance unchanged` | §9 |
-| `amend.test.ts` | `amending an entry writes a reversal and a replacement atomically` | **ADR-006 / I15** |
-| | `amending marks the original reversed on both the entry and its postings` | I14 |
-| | `the net effect of an amendment on the balance equals the delta only` | I15 |
-| | `a second amendment of the same entry is rejected by the correction lock` | **ADR-014 / I16** |
-| `reversal-excluded.test.ts` | `a reversed entry is excluded from every aggregate with no exclusion logic` | القسم 1.2 حجة 2 |
-| `trial-balance.test.ts` | `sum of debitTotalMinor equals sum of creditTotalMinor after 200 random operations` | **I4** |
+| `amend.test.ts` | `amending an entry writes a reversal and a replacement atomically` | **ADR-006 / I17** |
+| | `amending marks the original reversed and writes opposite postings, never updating the originals` | **I17 / I30** |
+| | `the net effect of an amendment on the balance equals the delta only` | I5 |
+| | `a second amendment of the same entry is rejected by the correction lock` | **ADR-014 / I18 / I26** |
+| `reversal-excluded.test.ts` | `a reversal nets every server aggregate back to zero with no exclusion filter` | القسم 1.2 حجة 2 / I3 |
+| | `no aggregate query in the data layer filters on a reversed field` | فحص نصّي — الصفّ لا يحمل دورة حياة |
+| `trial-balance.test.ts` | `sum of debitTotalMinor equals sum of creditTotalMinor after 200 random operations` | **I2** |
 | `fingerprint.test.ts` | `runLedgerHealthCheck returns clean on a healthy ledger` | 16.2 |
 | | `a manually corrupted account total is reported as projectionDrift` | 16.2 فحص 2 |
 | | `a manually deleted posting is reported as unbalancedLedger` | 16.2 فحص 1 |
@@ -1620,12 +1621,13 @@ tests/
 | | `rebuildProjections resumes from cursorPostingId after an interruption` | مؤشر الاستئناف |
 | | `rebuildProjections deletes an accountPeriods doc that the scan never produced` | 16.5.2/2.2 |
 | | `rebuildProjections halts and reports when a value would break an over-settle rule` | لا قصّ قيم |
-| `orphan-scan.test.ts` | `orphanScan finds an entry whose lineCount exceeds its posting count` | **I24 / العيب 9** |
-| | `orphanScan finds a posting whose entry is missing` | I24 |
-| `pending-commands.test.ts` | `a queued command is excluded from every balance and report` | **ADR-007 / I23** |
+| `orphan-scan.test.ts` | `orphanScan finds an entry whose line count exceeds its posting count` | **I11 / العيب 9** |
+| | `orphanScan finds a posting whose entry is missing` | I11 |
+| | `orphanScan finds a posting whose amount mismatches its line` | I11 |
+| `pending-commands.test.ts` | `a queued command is excluded from every balance and report` | **ADR-007 / I14** |
 | | `flushing the queue posts each command exactly once` | ADR-007 |
 | | `a financial write while offline lands in pendingCommands and never claims success` | §22 |
-| `no-delete.test.ts` | `no code path deletes a journalEntry or a posting` | **I12** |
+| `no-delete.test.ts` | `no code path deletes a journalEntry or a posting` | **I30** |
 | `audit-log.test.ts` | `every financial operation appends exactly one auditLog` | §18 بند 9 |
 | `query-index-coverage.test.ts` | `every query in the data layer runs without FAILED_PRECONDITION` | **15.4 سيناريو 4** — يمرّ على كل استعلام مُصرَّح |
 
@@ -1643,45 +1645,51 @@ tests/
 | `no-blanket-grant.test.ts` | `the rules file contains no document wildcard write grant` | **العيب 8 أ** — فحص نصّي على `firestore.rules` يبحث `{document=**}` مع `allow write` |
 | | `every allow condition starts with isOwner` | فحص نصّي — قاعدة بناء 14.1/2 |
 | | `an undeclared collection is denied by default` | الحرّاسة النهائية |
-| `entry-immutable.test.ts` | `updating lines on a posted entry is denied` | **I13** |
-| | `updating debitTotalMinor on a posted entry is denied` | I13 |
-| | `updating bookedAt or periodKey on a posted entry is denied` | I13 |
-| | `deleting a journalEntry is denied` | **I12** |
-| | `setting reversed from true back to false is denied` | بوابة أحادية |
-| | `reversing an entry of kind reversal is denied` | لا سلاسل عكس |
+| `entry-immutable.test.ts` | `updating lines on a posted entry is denied` | **I30** |
+| | `updating debitTotalMinor on a posted entry is denied` | I30 |
+| | `updating bookedAt or periodKey on a posted entry is denied` | I30 |
+| | `deleting a journalEntry is denied` | **I30** |
+| | `setting reversed from true back to false is denied` | **I17** |
+| | `reversing an entry of kind reversal is denied` | **I18** |
 | `entry-shape.test.ts` | `an unbalanced entry is denied` | **I1 من الخادم** |
-| | `an entry with one line is denied` | **I2** |
-| | `an entry with a zero or negative line total is denied` | I2 |
-| | `an entry whose id differs from opId is denied` | **ADR-004 / I10** |
-| | `an entry whose periodKey mismatches bookedAt is denied` | **ADR-008 / I7** |
-| | `an entry whose lineCount mismatches lines size is denied` | I24 |
+| | `an entry with one line is denied` | **I1** |
+| | `an entry with a zero or negative line total is denied` | I21 / I22 |
+| | `an entry whose id differs from opId is denied` | **ADR-004 / I23** |
+| | `an entry whose periodKey mismatches bookedAt is denied` | **ADR-008 / I13** |
+| | `an entry carrying a reversalOf on a non-reversal kind is denied` | I17 |
 | | `an entry carrying an allowNegative key is denied` | **ADR-010** |
 | | `an entry with currency other than LYD is denied` | 2.1 |
 | `posting-shape.test.ts` | `a posting whose id is not entryId colon lineNo is denied` | العيب 9 |
-| | `a posting with a non-integer amountMinor is denied` | I2 |
-| | `updating amountMinor or settlementDeltaMinor on a posting is denied` | I13 |
+| | `a posting with a non-integer debitMinor is denied` | I21 |
+| | `a posting with both debitMinor and creditMinor non-zero is denied` | I1 |
+| | `a non-zero settlement delta with both obligationId and debtId is denied` | **I8** |
+| | `a non-zero settlement delta with neither reference is denied` | **I8** |
+| | `updating a posting is denied` | **I30** |
+| | `deleting a posting is denied` | **I30** |
 | `account-rules.test.ts` | `lowering debitTotalMinor outside a rebuild is denied` | 14.3/9 |
 | | `an update carrying a stored balanceMinor key is denied` | **I4 / ADR-009** |
 | | `totals whose derived balance falls below minBalanceMinor are denied` | **I15، I21 من الخادم** |
 | | `the same decreasing write is allowed while maintenance rebuild state is running` | **ADR-015 / I29** |
 | | `deleting an account is denied` | الأرشفة لا الحذف |
 | | `creating an account with a non-zero total is denied` | التهيئة |
-| `account-periods-rules.test.ts` | `an accountPeriods doc carrying closingBalanceMinor is denied` | **ADR-009 / I8** |
-| | `an accountPeriods doc carrying openingBalanceMinor is denied` | **ADR-009** |
+| `account-periods-rules.test.ts` | `an accountPeriods doc carrying closingBalanceMinor is denied` | **ADR-009 / I4** |
+| | `an accountPeriods doc carrying openingBalanceMinor is denied` | **ADR-009 / I4** |
 | | `an accountPeriods id that is not accountId__periodKey is denied` | التماسك |
-| `obligation-rules.test.ts` | `raising totalMinor is denied` | **ADR-012 / I18** |
+| `obligation-rules.test.ts` | `raising totalMinor is denied` | **ADR-012 / I10** |
 | | `changing nature after create is denied` | **ADR-011** |
 | | `creating an obligation without nature is denied` | ADR-011 |
-| | `paidMinor above totalMinor plus extraChargesMinor is denied` | **I17** |
-| | `a remainingMinor that breaks the equation is denied` | I17 |
-| `debt-rules.test.ts` | `settledMinor above principalMinor is denied` | **I19** |
-| | `a doc carrying allowOverSettle is denied` | ADR-010 |
+| | `paidMinor above totalMinor plus extraChargesMinor is denied` | **I9 / G11** |
+| | `a remainingMinor that breaks the equation is denied` | I5 / I27 |
+| `debt-rules.test.ts` | `settledMinor above principalMinor is denied` | **I9 / G11** |
+| | `a debt created without allowOverSettle false is denied` | **I9** |
 | `audit-log-rules.test.ts` | `updating an auditLog is denied for the owner too` | §18 بند 9 |
+| `settings-rules.test.ts` | `shrinking lockedPeriods is denied` | **I25** |
 | | `deleting an auditLog is denied` | عدم التلاعب |
-| `correction-lock-rules.test.ts` | `creating entryCorrections twice for the same original is denied` | **ADR-014 / I16** |
-| | `updating or deleting a correction lock is denied` | ADR-014 |
-| `rebuild-gate.test.ts` | `creating a journalEntry while rebuildJobs active exists is denied` | 16.5 بوابة |
-| | `the gate costs no extra read on the normal account update path` | قياس — `\|\|` تقصّر دائرتها |
+| `correction-lock-rules.test.ts` | `creating entryCorrections twice for the same original is denied` | **ADR-014 / I18** |
+| | `shrinking the correction chain is denied` | **I26** |
+| | `updating or deleting a correction lock is denied` | ADR-014 / I26 |
+| `rebuild-gate.test.ts` | `creating a journalEntry while maintenance rebuild state is running is denied` | **I29 / G2** |
+| | `the normal account update path triggers exactly one billed rule read` | قياس — `\|\|` تقصّر دائرتها (15.2) |
 | `migrate-rules.test.ts` | `a doc with a higher schemaVersion is accepted` | **17.2 بند 3** |
 
 ### 20.4 تزامن (`tests/concurrency`)
@@ -1690,9 +1698,9 @@ tests/
 |---|---|---|
 | `same-op-two-devices.test.ts` | `two devices posting the same opId in parallel produce one entry` | **ADR-004** |
 | `two-ops-one-account.test.ts` | `two parallel operations on one account leave the balance exactly correct` | ذرّية `runTransaction` |
-| | `fifty parallel operations on one account keep the trial balance intact` | **I4** تحت ضغط |
+| | `fifty parallel operations on one account keep the trial balance intact` | **I2** تحت ضغط |
 | `catch-up-two-devices.test.ts` | `two devices opening the app at once generate each occurrence once` | **ADR-013** |
-| `amend-race.test.ts` | `two parallel amendments of the same entry leave exactly one correction lock` | **ADR-014 / I16** |
+| `amend-race.test.ts` | `two parallel amendments of the same entry leave exactly one correction lock` | **ADR-014 / I18 / I26** |
 | `rebuild-vs-write.test.ts` | `a financial write launched during a rebuild is rejected not lost` | 16.5 |
 | `flush-race.test.ts` | `flushing pendingCommands twice in parallel posts each command once` | ADR-007 |
 
@@ -1704,12 +1712,12 @@ tests/
 | `allocate.property.ts` | `allocateByWeights sums to the total over 10000 random cases` | `Σ result === total` |
 | `mul-rate.property.ts` | `mulRate matches a BigInt reference for every random pair` | لا فقدان دقة |
 | `parse-format.property.ts` | `parseAmountToMinor of formatLYD of x returns x` | **round-trip** |
-| `period-key.property.ts` | `periodKeyOf equals the date slice for every date in 1970..2100` | **ADR-008 / I7** |
-| `plan-balanced.property.ts` | `every generated operation request yields a balanced plan or a DomainError` | **I1** — لا خطة غير متوازنة أبداً |
-| `ledger-replay.property.ts` | `replaying any random operation sequence then rebuilding reproduces the same projections` | **ADR-015 / I5 / I6** |
+| `period-key.property.ts` | `periodKeyOf equals the date slice for every date in 1970..2100` | **ADR-008 / I13** |
+| `plan-balanced.property.ts` | `every generated operation request yields a balanced plan or a DomainError` | **I1 / G12** — لا خطة غير متوازنة أبداً |
+| `ledger-replay.property.ts` | `replaying any random operation sequence then rebuilding reproduces the same projections` | **ADR-015 / I5 / I12** |
 | `reversal-nets-to-zero.property.ts` | `a random operation followed by its reversal returns every projection to its prior value` | القسم 1.2 حجة 2 |
 | `installments.property.ts` | `buildInstallmentPlan sums to the total for every count in 1..120` | 2.6 |
-| `invariants-after-sequence.property.ts` | `I1 I2 I4 I5 I6 I9 I17 I19 I20 I21 hold after any random 100-operation sequence` | الفحص الشامل |
+| `invariants-after-sequence.property.ts` | `I1 I2 I3 I4 I5 I6 I7 I9 I11 I12 I21 I22 hold after any random 100-operation sequence` | الفحص الشامل |
 
 ### 20.6 ربط الثوابت I1…I30 والحوارس G1…G12 باختباراتها
 
@@ -2057,7 +2065,7 @@ export default {
 | **م-1** | سقف الاستدراك `maxBackfillDays` للمتكررات | **30:** غياب شهر فأكثر يُنتج قائمة اختيار يدوية — تحكّم أكبر، عمل يدوي أكثر. **120:** غياب 4 أشهر يُولَّد تلقائياً — أقل عملاً، واحتمال 300 قيد صامت بعد غياب طويل. **بلا سقف:** مرفوض (فيضان وتكلفة) | **120**، مع عرض قائمة بما سيُولَّد **قبل** التوليد وزر تأكيد — يجمع التلقائية والتحكّم | 120 + شاشة تأكيد |
 | **م-2** | اعتماد **ADR-022** (`getAfter()`) | **نعم:** يُغلق جزئياً ثقب «تحديث رصيد بلا قيد»، +2..4 قراءات/عملية، وخطر فشل عمليات كثيرة الأرجل عند حد 20 استدعاء. **لا:** الثقب يبقى محكوماً بمسار الكتابة الوحيد والفاحص | **أثبته في المحاكي أولاً** (14.5) ثم قرّر. إن فشل صف الحد الأقصى ⇒ **لا** | غير مُعتمد (كما هو في ADR-022) |
 | **م-3** | إضافة **UID احتياطي** الآن | **نعم:** يُلغي خطر «فقدان حساب Google = فقدان البيانات» (18.1/13)، ويوسّع سطح الوصول إلى حسابين. **لا:** سطح أصغر، والخطر قائم ومخفَّف بالتصدير فقط | **نعم** — حساب Google ثانٍ للمالك نفسه بـ 2FA، يُضاف إلى `approvedUids()` ولا يُستخدم إلا للاستعادة. الخطر الأكبر هو فقدان كل البيانات | معطَّل (سطر معلَّق في القواعد) |
-| **م-4** | **إقفال الفترات** (`periodLocks`) | **الآن:** يمنع تغيير تقرير ماضٍ، ويمنعك أيضاً من تصحيح خطأ قديم بلا فتح القفل. **لاحقاً:** حرية تصحيح كاملة، وتقرير مُصدَّر قد يتغيّر | **لاحقاً** — لمستخدم واحد لا يُصدِّر لجهة رسمية، الإقفال يُضيّق أكثر مما يحمي. البنية جاهزة: شرط واحد في قاعدة الإنشاء | غير مُفعَّل |
+| **م-4** | **فرض إقفال الفترة في القواعد** (`settings.lockedPeriods`) | **نعم:** `get()` ثانية على `settings/general` في قاعدة إنشاء القيد تمنع عميلاً مُعطوباً من الكتابة في فترة مُقفلة، بتكلفة **+1 قراءة مفوترة لكل عملية** (~15/يوم) وبقيد: القائمة تكبر فتكبر حمولة المستند المقروء. **لا:** الحارس G9 في العميل وحده، والقاعدة تمنع **تقصير** القائمة فقط (14.3 بند 19) | **لا الآن** — الإقفال ميزة تحكّم لا ميزة أمان: من يستطيع تجاوزه هو **المالك نفسه** على جهازه. يُعاد فتح القرار إذا صُدِّرت التقارير لجهة خارجية (18.1 بند 15) | غير مفروض في القواعد؛ `lockedPeriods` + G9 عاملان |
 | **م-5** | `settings.display.amountDecimals` الافتراضي للبطاقات | **0:** بطاقات أنظف، والمبلغ الكامل في `title` فقط. **2:** مألوف. **3:** مطابق للدفتر ولا تناقض بصري | **0 للبطاقات والمخططات، و3 في كل جدول وتقرير وتصدير** — الدقة حيث تُقرأ الأرقام، والنظافة حيث تُلمَح | 3 (كما في 2.2) |
 | **م-6** | **بوابة إعادة البناء في القواعد** (`!rebuildActive` على كل create مالي) | **نعم:** تُغلق نافذة الكتابة المفقودة أثناء البناء، بتكلفة **قراءة واحدة محسوبة لكل عملية مالية** (~15/يوم = 0.03%). **لا:** صفر تكلفة، ونافذة انحراف حقيقية أثناء البناء | **نعم** — 15 قراءة يومياً مقابل إغلاق نافذة فقدان بيانات | مُفعَّل في 14.2 |
 | **م-7** | **عدد الحسابات في الشجرة الافتراضية** | شجرة أوسع = تقارير أدقّ وقراءات أكثر للرسم السنوي (15.3). شجرة أضيق = أرخص وأقل تفصيلاً | يُحسم في القسم 3. أثره الوحيد هنا: **كل 10 حسابات مصروف/دخل إضافية = +120 قراءة** في أول تحميل للرسم السنوي | ~45 حساباً (أساس حسابات 15) |
