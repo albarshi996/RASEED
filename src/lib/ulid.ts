@@ -61,7 +61,7 @@ function encodeTime(now: number): string {
   let out = ''
   let t = now
   for (let i = 0; i < TIME_LEN; i++) {
-    out = ENCODING[t % ENCODING_LEN] + out
+    out = ENCODING.charAt(t % ENCODING_LEN) + out
     t = Math.floor(t / ENCODING_LEN)
   }
   return out
@@ -105,7 +105,7 @@ export function ulid(nowMs: number): string {
     lastRandom = randomChars()
   }
   let rand = ''
-  for (const c of lastRandom) rand += ENCODING[c]
+  for (const c of lastRandom) rand += ENCODING.charAt(c)
   return encodeTime(time) + rand
 }
 
@@ -114,7 +114,7 @@ export function ulidTime(id: string): number {
   if (!isUlid(id)) throw new RangeError(`ليس ULID صالحًا: ${id}`)
   let t = 0
   for (let i = 0; i < TIME_LEN; i++) {
-    t = t * ENCODING_LEN + ENCODING.indexOf(id[i] ?? '')
+    t = t * ENCODING_LEN + ENCODING.indexOf(id.charAt(i))
   }
   return t
 }

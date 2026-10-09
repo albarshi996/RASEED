@@ -1410,5 +1410,497 @@ setDoc(worshipDayRef, {
 
 ---
 
-*(يتبع: 8 الزكاة، 9 الإعدادات، 10 الشاشات ومصادرها، 11 قواعد الأمان، 12 الفهارس والتكلفة،
-13 التنبيهات، 14 الاختبارات، 15 الثوابت والقصور، 16 واجهة النطاق.)*
+## 8. الزكاة
+
+### 8.1 الموقف المُعلَن قبل أي تفصيل
+
+> **هذه حاسبة إرشادية تساعدك على تقدير زكاتك، وليست فتوى.**
+> الافتراضات المستخدمة معروضة أمامك وقابلة للتغيير، والمسائل التي يختلف فيها أهل العلم
+> **تُعرض كخيار أمامك ولا نختار عنك**. راجع أهل العلم في حالتك الخاصة.
+
+هذا النص (أو ما يعتمده المالك) **ظاهر دائماً** في رأس شاشة الزكاة — لا مرة واحدة في نافذة تُغلق.
+وزيادة: لا يُحتسب احتساب إلى حالة `confirmed` إلا بعد **إقرار صريح** يُخزَّن
+(`disclaimerAcceptedAt`، `disclaimerVersion`).
+
+**ثلاثة محارم تصميمية:**
+
+| محرَّم | السبب |
+|---|---|
+| **قيمة افتراضية مُبرمجة لسعر غرام الذهب أو الفضة** | تتعفّن بصمت وتُنتج نصاباً وزكاة خاطئين. السعر **مُدخل من المستخدم** دائماً، بتاريخ تسعير، وتحذير إن تجاوز عمره 30 يوماً |
+| **جلب السعر من خدمة شبكية** | تبعية خارجية + مفتاح في الواجهة + سعر لحظي لسوق لا يمثّل سوق المستخدم المحلي بالضرورة. ولو أُضيف لاحقاً فهو **اقتراح يملؤه المستخدم ويؤكّده**، لا قيمة تُعتمد تلقائياً |
+| **اختيار مذهب أو قول نيابة عن المستخدم** | ليس من شأن التطبيق. كل مسألة خلافية = حقل سياسة بلا قيمة افتراضية + شرح محايد |
+
+### 8.2 الفصل التام — القرار المحوري
+
+> **ADR-PW-21 — في الإصدار الأول: الاحتساب **سجل مستقل بلا أي قيد محاسبي**. والدفع **وحده** قيد مالي
+> حقيقي يربط بسجل الاحتساب بـ `refs.zakatRecordId`.**
+
+| الحدث | ما يُكتب | الأثر على الرصيد | الأثر على المصروفات |
+|---|---|---|---|
+| إنشاء احتساب (`draft`) | `zakatRecords/{id}` فقط | ✗ لا شيء | ✗ لا شيء |
+| تأكيد الاحتساب (`confirmed`) | تحديث نفس المستند + `auditLogs` | ✗ **لا شيء** | ✗ **لا شيء** |
+| دفع 500.000 د.ل من الزكاة | **قيد واحد** `Dr expense.charity 500000 / Cr asset.{from} 500000` + تحديث `paidMinor` ذرّياً | ينقص 500.000 ✓ | يزيد 500.000 في فئة الصدقات ✓ |
+| عكس الدفعة | `voidTransaction` من النواة + تخفيض `paidMinor` | يرتدّ ✓ | يرتدّ ✓ |
+
+**لماذا لا قيد استحقاق في الإصدار الأول (وهو القرار الأهم في هذا القسم):**
+
+النواة توفّر فعلاً `EntryKind: 'zakatAccrual'` وحساب `liability.zakat` و`OperationKind: 'accrueZakat'`.
+ومع ذلك **لا نستخدمها في الإصدار الأول**، والسبب ليس تبسيطاً بل **تناقضاً جوهرياً**:
+
+1. **مبلغ الزكاة المُحتسَب تقديرٌ إرشادي** مبني على سعر غرام أدخله المستخدم بالتقريب، وعلى سياسات
+   خلافية اختارها. وإدخاله إلى الدفتر يعني **إدخال تقدير إلى سجلّ الحقائق** — وهذا خرق مباشر
+   للقسم 12 في المتطلبات: «**فصل واضح بين البيانات الفعلية والتوقعات والافتراضات**».
+2. **قيد الاستحقاق يُنقص صافي الثروة** بمبلغ تقديري ⇒ بطاقة «صافي الثروة» في لوحة التحكم تصير دالّة
+   في سعر ذهب أدخله المستخدم قبل شهرين. ولو احتسب المستخدم مرتين بسعرين (وهذا متوقَّع: «أجرّب بسعر
+   350 ثم 360») لصار في الدفتر قيدا استحقاق ⇒ **خصوم مضاعفة** أو حاجة إلى عكس وسلسلة تصحيح
+   لمجرد تجربة حسابية.
+3. والنواة نفسها حسمت المذهب العام: **«نقدي، بلا خيار استحقاق»** (22.1)، ورفضت القيد المزدوج النقي
+   لأنه «يعطي المستخدم رقماً لا يريده ولا يفهمه». **الزكاة ليست استثناءً من هذا المبدأ، بل أوضح أمثلته.**
+4. ومتطلب المالك نصّاً: «**فصل احتساب الزكاة عن تسجيل دفعها ماليًا، فلا يُخصم مبلغ دون دفع فعلي**».
+   والسجل المستقل يحقّقه حرفياً وبأبسط صورة.
+
+**«الزكاة المستحقة غير المدفوعة» تُعرض من أين إذن؟** من
+`zakatRecords where status in ['confirmed','partiallyPaid'] ⇒ Σ remainingMinor` —
+**بطاقة في شاشة الزكاة وفي مركز التنبيهات، وليست خصماً في الميزانية العمومية.**
+وتُعنوَن بوضوح: «زكاة مُحتسَبة لم تُدفع (تقدير)».
+
+**الوضع البديل المؤجَّل — مُصمَّم وغير مُفعَّل.** لمن أراد لاحقاً أن تظهر الزكاة خصماً حقيقياً:
+
+```
+accrueZakat (مُعطَّل في الإصدار الأول):
+   Dr equity.unallocated   X
+   Cr liability.zakat      X        kind:'zakatAccrual', refs.zakatRecordId
+   ⇒ لا يمسّ النقد (✓ «لا خصم دون دفع») ولا يمسّ expense (✓ لا تضخّم مصروفات الشهر)
+   ⇒ يُنقص صافي الثروة بمقدار ما تَلزَمه (محاسبياً صحيح)
+
+payZakat في وضع الاستحقاق = **عمليتان في معاملة ذرّية واحدة** (لا قيد واحد بأربع أرجل):
+   entry `${opId}__1`:  Dr expense.charity Y / Cr asset.{from} Y      kind:'expense'
+   entry `${opId}__2`:  Dr liability.zakat Y / Cr equity.unallocated Y
+   ⇒ **السبب في الفصل إلى قيدين**: النواة تفرض `amountMinor == totalDebitMinor` (قاعدة أمان).
+     قيد واحد بأربع أرجل يجعل `amountMinor = 2Y` ⇒ شاشة العملية تعرض **ضعف** ما دفع المستخدم.
+     وبقيدين، كل قيد `amountMinor = Y` ⇒ العرض صادق، والنواة تدعم العمليات متعددة القيود أصلاً
+     (`entryId = ${opId}__${k}` + مستند `operations/{opId}`).
+```
+
+> **ثغرة في النواة تخصّ مجالي — في `openQuestions`:** القسم 12 في `01-financial-core.md` يسرد
+> خوارزميات العمليات (12.1–12.10) **ولا يتضمّن `accrueZakat` ولا `payZakat`** مع أنهما في
+> `OperationKind` وفي `OperationRequest`. وكذلك `kind` قيد **تحرير الاستحقاق** (الرجل الثانية أعلاه)
+> لا يجد قيمة مناسبة في `EntryKind` (استخدام `'adjustment'` يُلوّث تقرير التسويات).
+> **المطلوب:** ADR يضيف خوارزمية `payZakat` بالشكل المعتمد في 8.6، و(عند تفعيل وضع الاستحقاق)
+> قيمة `'zakatRelease'` إلى `EntryKind`. **لم أعدّل الملف.**
+
+### 8.3 النموذج الكامل
+
+**اسم المجموعة `zakatRecords`** — مطابق لما يسمّيه المتطلب 18 ولما يسمّيه
+`EntryRefs.zakatRecordId` في النواة. لا اسم جديد.
+
+```ts
+// users/{uid}/zakatRecords/{recordId}
+export type ZakatStatus = 'draft' | 'confirmed' | 'partiallyPaid' | 'paid' | 'cancelled';
+export type NisabBasis = 'gold' | 'silver';
+export type PurityPolicy = 'pureEquivalent' | 'grossWeight';
+export type PersonalJewelryPolicy = 'zakatable' | 'exempt';
+export type DebtDeductionPolicy = 'currentlyDue' | 'allDebts';
+
+export interface MetalHolding {
+  id: string;                        // nanoid
+  label: string;                     // «سبيكة»، «حلي الزوجة»
+  metal: 'gold' | 'silver';
+  /** **ملّيغرامات، عدد صحيح.** لا كسور عشرية عائمة — نفس مبدأ النواة في المال. */
+  milligrams: number;
+  karat: 24 | 22 | 21 | 18 | 14 | null;   // null للفضة
+  forPersonalUse: boolean;
+}
+
+export interface ZakatComponent {
+  key: 'cash' | 'gold' | 'silver' | 'tradeGoods' | 'receivables';
+  amountMinor: number;               // **لقطة مُجمَّدة** عند التأكيد
+  source: 'autoFromLedger' | 'manual';
+  /** ما استُند إليه — للتدقيق والشرح في الواجهة. */
+  detail: Record<string, unknown>;
+}
+
+export interface ZakatRecord extends OwnedDoc {
+  // ── الحول ──
+  hawlStartAt: DateKey;              // **ميلادي: الحقيقة المخزَّنة** (ADR-PW-03)
+  hawlEndAt: DateKey;                // ميلادي، محسوب = +1 سنة هجرية
+  hijriSnapshot: {
+    start: HijriDate; end: HijriDate;
+    calendar: 'islamic-umalqura';
+    offsetDays: -1 | 0 | 1;
+    note: string;                    // «محسوب عبر Intl، قد يختلف يوماً عن التقويم المحلي»
+  };
+  assessedAt: DateKey;               // تاريخ إجراء الاحتساب
+
+  // ── أساس التسعير والسياسات (كلها مُجمَّدة عند التأكيد) ──
+  nisabBasis: NisabBasis;
+  goldGramPriceMinor: number;        // **مُدخل من المستخدم**، > 0
+  silverGramPriceMinor: number;      // **مُدخل من المستخدم**، > 0
+  pricedAt: DateKey;
+  priceSource: string;               // ≤ 120: «صاغة شارع ... بتاريخ ...» — نصّ المستخدم
+  purityPolicy: PurityPolicy;
+  personalJewelryPolicy: PersonalJewelryPolicy;
+  debtDeductionPolicy: DebtDeductionPolicy;
+
+  // ── المدخلات ──
+  metalHoldings: MetalHolding[];     // ≤ 50
+  tradeGoodsMinor: number;           // عروض التجارة بقيمة البيع الحالية، ≥ 0
+  tradeGoodsNote?: string;
+  /** الديون المرجوّة: قرار **لكل دين على حدة**، بلقطة رصيد. */
+  receivables: Array<{ debtId: string; counterpartyName: string;
+                       remainingMinorSnapshot: number; include: boolean; note?: string }>;
+  /** الديون الحالّة المخصومة: قرار لكل بند. */
+  deductions: Array<{ kind: 'debt' | 'obligation'; id: string; name: string;
+                      amountMinorSnapshot: number; include: boolean; note?: string }>;
+  manualAdditionsMinor: number;      // إضافات يدوية ≥ 0 (أصول زكوية لم يرصدها النظام)
+  manualAdditionsNote?: string;
+
+  // ── النتيجة (كلها محسوبة بـ domain/zakat ومخزَّنة كلقطة) ──
+  components: ZakatComponent[];
+  grossAssetsMinor: number;
+  deductibleMinor: number;
+  baseMinor: number;                 // الوعاء = gross − deductible (مقصوص عند 0)
+  nisabMinor: number;
+  isDue: boolean;                    // baseMinor >= nisabMinor
+  rateBps: 250;                      // 2.5% — ثابت، مفروض في القواعد
+  dueMinor: number;                  // isDue ? mulRate(baseMinor, 250) : 0
+  paidMinor: number;                 // يُحدَّث ذرّياً مع كل دفعة
+  remainingMinor: number;            // == dueMinor − paidMinor  (الثابت P12)
+
+  status: ZakatStatus;
+  paymentCount: number;
+  lastPaymentEntryId: string | null;
+
+  // ── الشفافية ──
+  assumptionIds: string[];           // رموز الافتراضات المعتمدة — 8.5
+  methodVersion: number;             // نسخة خوارزمية الحساب — 8.8
+  disclaimerVersion: number;
+  disclaimerAcceptedAt: Timestamp | null;
+  confirmedAt: Timestamp | null;
+  cancelledAt: Timestamp | null;
+  cancelReason?: string;
+  notes?: string;                    // ≤ 1000
+}
+```
+
+**لقطة لا مرجع — قاعدة مُلزِمة:** عند `status: 'confirmed'`، **كل** الأرقام أعلاه مُجمَّدة.
+الاحتساب مستند تاريخي: زكاة حوله 1447 **لا تتغيّر** لأن رصيد الحساب تغيّر اليوم ولا لأن سعر الذهب تحرّك.
+التعبئة التلقائية من الدفتر تحدث **فقط** و`status === 'draft'`.
+**مفروض في قاعدة الأمان** بقائمة `unchanged()` كاملة (القسم 11) — على نمط جدول 8.2 في النواة.
+
+### 8.4 الوعاء الزكوي — المكوّنات ومن أين تأتي
+
+```ts
+// domain/zakat/compute.ts — **دالة نقية بلا أي I/O**
+export interface ZakatSnapshot {
+  /** أرصدة الحسابات السائلة من النواة: accounts where isCashLike && status==='active' */
+  cashAccounts: ReadonlyArray<{ accountId: string; name: string; balanceMinor: Minor }>;
+  /** الديون لي: debts where direction==='receivable' && remainingMinor > 0 */
+  receivables: ReadonlyArray<{ debtId: string; name: string; remainingMinor: Minor }>;
+  /** الديون عليّ: debts where direction==='payable' && remainingMinor > 0 */
+  payables: ReadonlyArray<{ debtId: string; name: string; remainingMinor: Minor;
+                            expectedSettleAt: DateKey | null }>;
+  /** الالتزامات: obligations where remainingMinor > 0 */
+  obligations: ReadonlyArray<{ obligationId: string; name: string; remainingMinor: Minor;
+                               dueDate: DateKey; nature: 'expense' | 'financing' }>;
+}
+
+export interface ZakatInput {
+  snapshot: ZakatSnapshot;
+  assessedAt: DateKey;
+  nisabBasis: NisabBasis;
+  goldGramPriceMinor: Minor;
+  silverGramPriceMinor: Minor;
+  purityPolicy: PurityPolicy;
+  personalJewelryPolicy: PersonalJewelryPolicy;
+  debtDeductionPolicy: DebtDeductionPolicy;
+  metalHoldings: readonly MetalHolding[];
+  tradeGoodsMinor: Minor;
+  includedReceivableIds: readonly string[];
+  includedDeductionIds: readonly string[];
+  excludedCashAccountIds: readonly string[];      // حساب تجريبي أو غير مملوك
+  manualAdditionsMinor: Minor;
+}
+
+export interface ZakatComputation {
+  components: ZakatComponent[];
+  grossAssetsMinor: Minor;
+  deductibleMinor: Minor;
+  baseMinor: Minor;
+  nisabMinor: Minor;
+  isDue: boolean;
+  dueMinor: Minor;
+  assumptionIds: string[];
+  warnings: ZakatWarning[];
+  methodVersion: number;
+}
+
+export function computeZakat(input: ZakatInput): ZakatComputation;
+```
+
+| المكوّن | المصدر | التفصيل |
+|---|---|---|
+| **النقد** | **تلقائي** من `accounts where isCashLike === true && status === 'active'` | المستخدم يستبعد ما شاء بوعي. **والمستحقات لي مستبعدة تلقائياً** لأن النواة تضبط `isCashLike = false` عليها (الثابت I22) ⇒ لا ازدواج مع بند الديون المرجوّة |
+| **الذهب والفضة** | **يدوي** (`metalHoldings`) | النظام لا يعرف ما يملكه المستخدم من معادن. الوزن بالملّيغرام الصحيح |
+| **عروض التجارة** | **يدوي** (`tradeGoodsMinor`) | بقيمة البيع الحالية، مع حقل ملاحظة للطريقة المتبعة |
+| **الديون المرجوّة** | من `debts where direction==='receivable'`، و**القرار لكل دين** | «مرجوّة» حكم لا يستنتجه النظام ⇒ قائمة اختيار صريحة، الافتراضي **غير مُحدَّد** |
+| **إضافات يدوية** | `manualAdditionsMinor` | أسهم، صناديق، محاصيل… ما لم يرصده النظام |
+| **(−) الديون الحالّة** | `debts payable` + `obligations`، والقرار لكل بند | سياسة الخصم في 8.5 |
+
+**قاعدة منع الازدواج المُلزِمة (الثابت P19):** لا يدخل مبلغ واحد في الوعاء من مسارين.
+مُفروض باختبار صريح: `receivables` المختارة **لا تُضمَّن أيضاً** في `cashAccounts` (مضمون بنيوياً بـ I22)،
+و`tradeGoodsMinor` اليدوي يُحذَّر إن كان المستخدم قد سجّله أيضاً كحساب نقدي.
+
+### 8.5 الافتراضات — معروضة بالرمز لا مخفيّة
+
+جدول الافتراضات في `domain/zakat/assumptions.ts`، وكل احتساب يحمل `assumptionIds` المستخدمة فعلاً،
+**وشاشة الزكاة تعرضها كقائمة مقروءة قبل زر التأكيد.**
+
+| الرمز | الافتراض | المسألة الخلافية | قيمتنا الافتراضية |
+|---|---|---|---|
+| `Z-RATE-1` | النسبة **2.5% = 250 bps** على الوعاء | لا خلاف معتبر في زكاة النقود | **ثابتة** |
+| `Z-NISAB-1` | نصاب الذهب **85 غراماً** | — | ثابت |
+| `Z-NISAB-2` | نصاب الفضة **595 غراماً** | — | ثابت |
+| `Z-NISAB-3` | أي النصابين يُعتمد | **خلاف معتبر**: الذهب (نصاب أعلى) أو الفضة (نصاب أدنى، أنفع للفقراء) | **لا افتراضي — اختيار إلزامي** |
+| `Z-PURITY-1` | عيار الذهب يُحوَّل إلى ما يعادله ذهباً خالصاً: `mg × karat ÷ 24` | **خلاف**: بعضهم يعتبر الوزن القائم كله | **لا افتراضي — اختيار إلزامي** |
+| `Z-JEWEL-1` | حلي الاستعمال الشخصي | **خلاف مشهور**: زكوي أو معفوّ | **لا افتراضي — اختيار إلزامي** |
+| `Z-DEBT-1` | يُخصَم من الوعاء **الدين الحالّ** فقط (المستحق في تاريخ الاحتساب) لا الأقساط المستقبلية | **خلاف**: بعضهم يخصم الدين كله | **الافتراضي `currentlyDue`** مع إمكان التغيير — والسبب أن خصم أقساط 60 شهراً مستقبلية يُسقط الزكاة عمّن يملك مالاً حاضراً |
+| `Z-RECV-1` | لا تدخل الديون المرجوّة إلا بتحديد المستخدم لكل دين | الدين المعدوم/المجحود لا زكاة فيه عند كثيرين | **لا شيء مُحدَّد سلفاً** |
+| `Z-HAWL-1` | الحول **سنة هجرية** (≈ 354 يوماً) من تاريخ بلوغ النصاب | — | ثابت |
+| `Z-HAWL-2` | يُفترض بلوغ النصاب في طرفي الحول، ولا نتتبّع تقلّب الرصيد خلاله | مذهب الجمهور يتسامح في التقلّب بين الطرفين | ثابت، **ومُعلَن في الواجهة** |
+| `Z-PRICE-1` | سعر الغرام **مُدخل من المستخدم** بتاريخ تسعير | — | ثابت |
+| `Z-ROUND-1` | التقريب **نصف-لأعلى** في الدرهم (`mulRate` في النواة) | — | ثابت |
+
+**الواجهة أمام كل خيار إلزامي:** شرح محايد بسطرين لكل قول، **بلا ترجيح**، مع:
+«هذه مسألة يختلف فيها أهل العلم. اختر ما تعمل به، وراجع من تثق بعلمه.»
+
+> **مصادر الافتراضات — تحتاج تثبيتاً بقرار المالك (`openQuestions`).**
+> المراجع **المرشَّحة** (أسماء معروفة، ولا يُدرَج أي اقتباس أو رقم صفحة قبل التحقق من النسخة):
+> **المعايير الشرعية لـ AAOIFI — معيار الزكاة**، **أدلّة بيت الزكاة الكويتي**،
+> **الموسوعة الفقهية الكويتية (مادة: الزكاة)**، وفتاوى الجهة المعتمدة لدى المالك محلياً.
+> **لا يُدرَج أي مصدر في الواجهة قبل أن يراجعه ويعتمده المالك أو من يوكّله.**
+> وحتى ذلك الحين تعرض الشاشة الافتراضات نفسها مع عبارة «المصادر قيد المراجعة» — **لا مصادر مُخترعة**.
+
+### 8.6 الحساب — الصيغ الدقيقة
+
+```ts
+// domain/zakat/metals.ts
+/**
+ * قيمة معدن بالملّيغرام × سعر الغرام، بلا كسر عشري عائم وبتقريب نصف-لأعلى:
+ *   valueMinor = (BigInt(mg) * BigInt(pricePerGramMinor) + 500n) / 1000n
+ * **BigInt إلزامي:** 50 كغ ذهباً = 5×10^7 mg، وسعر غرام 400 د.ل = 4×10^5 درهم
+ * ⇒ الجداء 2×10^13، وهو تحت 2^53، لكن المدخلات القصوى المسموحة
+ * (MAX_ABS_MINOR للسعر) تتجاوزه ⇒ لا يُعتمد على الحظ.
+ */
+export function metalValueMinor(milligrams: number, pricePerGramMinor: Minor): Minor;
+
+/**
+ * التحويل إلى ما يعادله ذهباً خالصاً (Z-PURITY-1):
+ *   pureMg = (BigInt(mg) * BigInt(karat) + 12n) / 24n     ← نصف-لأعلى
+ * وسياسة 'grossWeight' تُرجِع mg كما هو.
+ */
+export function pureEquivalentMilligrams(
+  mg: number, karat: 24|22|21|18|14, policy: PurityPolicy
+): number;
+
+// domain/zakat/nisab.ts
+export const NISAB_GOLD_GRAMS = 85 as const;
+export const NISAB_SILVER_GRAMS = 595 as const;
+export const ZAKAT_RATE_BPS = 250 as Bps;        // 2.5%
+
+export function nisabMinor(
+  basis: NisabBasis, goldGramPriceMinor: Minor, silverGramPriceMinor: Minor
+): Minor;
+// gold   ⇒ 85  × goldGramPriceMinor
+// silver ⇒ 595 × silverGramPriceMinor
+```
+
+**متن الخوارزمية:**
+
+```
+computeZakat(input):
+  # 1) النقد
+  cash = Σ balanceMinor للحسابات isCashLike غير المستبعدة، مقصوصة عند 0
+         (رصيد سالب لحساب ائتماني لا يُخصم هنا — يُعرض تحذيراً ويُعالَج في الديون)
+  # 2) المعادن
+  for h in metalHoldings:
+     if h.forPersonalUse && personalJewelryPolicy == 'exempt': skip  (ويُسجَّل في warnings)
+     mg = h.metal=='gold' ? pureEquivalentMilligrams(h.milligrams, h.karat, purityPolicy)
+                          : h.milligrams
+     value += metalValueMinor(mg, h.metal=='gold' ? goldPrice : silverPrice)
+  # 3) عروض التجارة + الإضافات اليدوية
+  trade = tradeGoodsMinor ; manual = manualAdditionsMinor
+  # 4) الديون المرجوّة (المختارة فقط)
+  recv = Σ remainingMinor للديون في includedReceivableIds
+  # 5) الوعاء الخام
+  grossAssetsMinor = addMinor(cash, value, trade, manual, recv)        ← addMinor من النواة
+  # 6) الخصومات (المختارة فقط، وبحسب السياسة)
+  for d in payables + obligations:
+     if d.id not in includedDeductionIds: skip
+     if policy == 'currentlyDue' && dueDate > assessedAt: skip  (ويُسجَّل في warnings)
+     deductibleMinor += remainingMinor
+  # 7) الوعاء
+  baseMinor = clampAtZero(subMinor(grossAssetsMinor, deductibleMinor))
+  # 8) النصاب والاستحقاق
+  nisab = nisabMinor(basis, goldPrice, silverPrice)
+  isDue = compareMinor(baseMinor, nisab) >= 0            ← **التساوي يعني الاستحقاق**
+  # 9) المقدار
+  dueMinor = isDue ? mulRate(baseMinor, ZAKAT_RATE_BPS) : 0
+  # 10) الافتراضات والتحذيرات
+```
+
+**ملاحظة دقّة إلزامية:** الضرب بالنسبة يمرّ **حصراً** بـ `mulRate` من `domain/money/rate.ts`
+(النواة 2.4). و`Math.round(base * 0.025)` **خطأ بناء** بقاعدة ESLint. ولا يُعاد تنفيذ الضرب محلياً
+في `domain/zakat` بأي حال، حتى لو بدا الجداء في النطاق الآمن.
+
+**حالات اختبار ذهبية (أرقام بالدرهم):**
+
+| المدخل | المتوقع |
+|---|---|
+| سعر غرام الذهب `350000` (350.000 د.ل) | `nisabMinor('gold') = 29_750_000` (29,750.000 د.ل) |
+| سعر غرام الفضة `4500` (4.500 د.ل) | `nisabMinor('silver') = 2_677_500` (2,677.500 د.ل) |
+| `baseMinor = 40_000_000` | `dueMinor = mulRate(40_000_000, 250) = 1_000_000` (1,000.000 د.ل) |
+| `baseMinor === nisabMinor` بالضبط | `isDue === true` ⇒ **التساوي استحقاق لا استثناء** |
+| `baseMinor = nisabMinor − 1` | `isDue === false` و `dueMinor === 0` |
+| `baseMinor = 20` | `dueMinor = 1` (0.5 → نصف-لأعلى) |
+| `baseMinor = 19` | `dueMinor = 0` (0.475) |
+| `12_500 mg` ذهب عيار 21، سعر `350000` | `pureEquivalent = (12500×21+12)/24 = 10_937 mg` ⇒ `value = (10937×350000+500)/1000 = 3_827_950` |
+| حلي شخصي والسياسة `exempt` | يُستبعد من الوعاء **ويظهر في `warnings` بقيمته** ليراه المستخدم |
+
+### 8.7 الحول — الحساب والعرض
+
+```ts
+// domain/zakat/hawl.ts
+export interface HawlPlan {
+  startAt: DateKey;                  // ميلادي — الحقيقة
+  endAt: DateKey;                     // ميلادي = +1 سنة هجرية مع clamp
+  hijriStart: HijriDate; hijriEnd: HijriDate;
+  daysTotal: number;                  // ≈ 354 — **لا 365**
+  daysRemaining: number;
+}
+export function planHawl(startAt: DateKey, today: DateKey,
+                         offsetDays: -1|0|1): HawlPlan;
+```
+
+| البند | القرار |
+|---|---|
+| المخزَّن | `hawlStartAt` و`hawlEndAt` **ميلاديان** (ADR-PW-03). الهجري لقطة عرض في `hijriSnapshot` |
+| إدخال المستخدم | يختار بالتقويم الهجري **أو** الميلادي؛ الهجري يُحوَّل بـ `dateKeyFromHijri` ويُخزَّن ميلادياً |
+| الحساب | `hawlEndAt = dateKeyFromHijri(addHijriYear(hijri(start), 'clampToEndOfHijriMonth'))` |
+| **تنبيه مُعلَن** | الحول **قمري ≈ 354 يوماً لا 365**. استخدام السنة الشمسية يؤجّل الزكاة ≈ 11 يوماً كل سنة ويُنقصها تراكمياً — **ولهذا نحسب هجرياً ونقولها للمستخدم صريحاً** في شاشة الحول |
+| الحول التالي | عند بلوغ `status: 'paid'`، يُقترح إنشاء حول جديد `hawlStartAt = hawlEndAt` القديم (استمرار الدورة)، **بإجراء صريح لا تلقائياً** |
+| تغيير `hijriOffsetDays` لاحقاً | **لا يمسّ احتساباً مؤكَّداً** (مُجمَّد). يؤثّر في الاحتسابات الجديدة وفي العرض فقط ⇒ لا إتلاف بيانات |
+| التنبيه | `zakatHawlDue` قبل 14 يوماً ثم في اليوم — بمعرّف حتمي (القسم 13) |
+
+### 8.8 تدفّق الحالات
+
+```
+( draft ) ──[تأكيد + إقرار الإفصاح]──► ( confirmed )
+    │                                        │
+    │ [إلغاء/حذف مسموح]                      ├──[payZakat جزئي]──► ( partiallyPaid )
+    ▼                                        │                            │
+ محذوف                                       └──[payZakat كامل]──► ( paid ) ◄┘
+                                             │
+                                             └──[إلغاء بسبب إلزامي]──► ( cancelled )
+```
+
+| الانتقال | الشرط | الحارس |
+|---|---|---|
+| `draft → confirmed` | `isDue` محسوب، الأسعار > 0، كل الخيارات الإلزامية مُحدَّدة، `disclaimerAcceptedAt != null` | بعده **تُجمَّد كل المدخلات** |
+| `confirmed → partiallyPaid` | أول دفعة بـ `paidMinor < dueMinor` | الحالة محسوبة من `paidMinor` في نفس المعاملة |
+| `→ paid` | `paidMinor === dueMinor` | السداد الزائد **ممنوع** |
+| `→ cancelled` | `paymentCount === 0` فقط، و`cancelReason` إلزامي (5..500) | إن وُجدت دفعات: `ZAKAT_HAS_PAYMENTS` ⇒ «لا يمكن إلغاء هذا الاحتساب لوجود {n} دفعة. ألغِ الدفعات أولاً.» — **نفس منطق `DEBT_HAS_SETTLEMENTS` في النواة** |
+| الحذف | **مسموح فقط** في `draft` وبشرط `paymentCount === 0` — مفروض في القواعد. وما بعد `confirmed` يُلغى ولا يُحذف | منع اليتم: قيد دفع يشير إلى احتساب محذوف |
+| `methodVersion` | يُخزَّن على المستند؛ تغيّر الخوارزمية لاحقاً **لا يُعيد حساب** مستند مؤكَّد | شاشة الاحتساب القديم تُظهر «حُسب بنسخة الطريقة {n}» |
+
+### 8.9 الدفع — العملية المالية
+
+```ts
+// سطح واجهة النطاق (امتداد للموجود في domain/api.ts بالنواة)
+export interface PayZakatRequest {
+  type: 'payZakat';
+  opId: string;                      // crypto.randomUUID() عند فتح نافذة الدفع (نية بشرية)
+  zakatRecordId: string;             // **إلزامي** — لا دفع زكاة بلا احتساب مرتبط
+  amountMinor: Minor;                // > 0 و ≤ remainingMinor
+  bookedAt: DateKey;
+  fromAccountId: string;
+  /** فئة الصدقات/الزكاة ⇒ حساب expense.charity */
+  categoryId: string;
+  description: string;               // افتراضياً «دفع زكاة — حول {hijriEnd}»
+  payeeContactId?: string;           // الجهة المستفيدة إن وُجدت
+  notes?: string;
+}
+```
+
+**الكتابات داخل `runTransaction` واحدة** (على نمط `payObligation` في النواة 12.4):
+
+```
+payZakat:
+  قراءات: journalEntries/{opId} (منع الازدواج) ، zakatRecords/{id} ،
+          accounts/{fromAccountId} ، accounts/{charityExpenseAccountId} ، meta/integrity
+  حوارس:
+    - record.status in ['confirmed','partiallyPaid']        وإلا ZAKAT_NOT_CONFIRMED
+    - amountMinor <= record.remainingMinor                  وإلا OVERPAYMENT
+    - assertBalanceFloor(fromAccount, −amountMinor)         (حارس النواة 11.2)
+    - periodNotLocked(bookedAt[0:7])                        (النواة I17)
+  كتابات (7 + 1):
+    1. journalEntries/{opId}   kind:'expense'، سطران:
+                               Dr expense.charity  amountMinor
+                               Cr asset.{from}     amountMinor
+                               refs.zakatRecordId = id
+    2-3. postings/{opId}__1 و __2  (signedAmountMinor كما تفرضه النواة 4.4)
+    4. accounts/{charity}      debitTotalMinor += X ، balanceMinor، entryCount، balanceVersion
+    5. accounts/{from}         creditTotalMinor += X ، balanceMinor، …
+    6. accountPeriods × 2      حركة الفترة
+    7. periods/{pk}            totalExpenseMinor += X ، expenseByCategory[charity] += X ،
+                               netCashFlowMinor −= X
+    8. budgetPeriods/{pk}      **فقط إن كانت ميزانية الفئة موجودة** (قاعدة النواة الصلبة على budgetPeriods)
+    9. zakatRecords/{id}       paidMinor، remainingMinor، status، paymentCount،
+                               lastPaymentEntryId   ← **بقيمة مطلقة محسوبة لا increment أعمى**
+```
+
+**الزكاة مصروف حقيقي عند الدفع — ولماذا هذا صحيح:** المال خرج فعلاً من حساب المستخدم إلى مستحقّه،
+وفئة «الصدقات والزكاة المدفوعة» (`expense.charity`) هي موضعه في شجرة النواة (3.2).
+فتظهر في مصروفات الشهر **مرة واحدة** وفي تقرير الفئات، وتستهلك ميزانية فئة الصدقات إن وُضعت لها ميزانية.
+و**لا تظهر مرتين** لأن لا سجل مالي ثانياً للزكاة في أي مكان.
+
+**العكس:** `voidTransaction` من النواة (عكس + بديل، لا حذف). والمطلوب إضافةً: تخفيض
+`paidMinor` على `zakatRecords` في **نفس** معاملة العكس وإعادة احتساب `status`.
+
+> **ثغرة في النواة تخصّ مجالي — في `openQuestions`:** `voidTransaction` في 12.7 يعكس أثر القيد على
+> الالتزامات والديون (`paidMinor`/`settledMinor`)، ولا ذكر لـ `zakatRecords`. المطلوب بـ ADR: إضافة
+> `refs.zakatRecordId` إلى قائمة الكيانات التي يرتدّ أثرها في `voidTransaction`، تماماً كـ
+> `refs.obligationId`. **بدون ذلك**، عكس دفعة زكاة يرتدّ في الدفتر ويبقى `paidMinor` منفوخاً
+> ⇒ `remainingMinor` خاطئ ⇒ المستخدم يظن أنه أدّى ما لم يؤدِّ. **هذا أخطر ما في القسم ويجب حسمه قبل التنفيذ.**
+
+**التحقق المستقل من `paidMinor` (الثابت P13):**
+
+```
+Σ amountMinor  على journalEntries where refs.zakatRecordId == id
+                                 and status == 'posted'
+                                 and kind == 'expense'
+   ===  zakatRecords/{id}.paidMinor
+```
+
+يُنفَّذ بـ `getAggregateFromServer(sum('amountMinor'))` بقراءتين عند طلب المستخدم من
+«الإعدادات ← سلامة البيانات»، ويُضاف إلى `integrity.runReconciliation`.
+
+> **تحسين مقترح (لا يُنفَّذ الآن، في `openQuestions`):** لو أُضيف `zakatRecordId: string | null`
+> إلى `Posting` ووُسِّع `settlementDeltaMinor` ليشمل دفع الزكاة، لصار التحقق **تجميعاً خادمياً
+> مباشراً يُصافر نفسه عند العكس** تلقائياً — تماماً كـ ADR-021. وهو تغيير إضافي في النواة.
+> الحل المعتمد **الآن** لا يحتاج أي تغيير: فهرس على `refs.zakatRecordId` موجود أصلاً في النواة 15.5.
+
+### 8.10 الزكاة في مركز التنبيهات ولوحة التحكم
+
+| البطاقة/التنبيه | المصدر | الصيغة |
+|---|---|---|
+| «زكاة مُحتسَبة لم تُدفع» | `Σ remainingMinor` على `zakatRecords` في `confirmed`/`partiallyPaid` | **موسومة «تقدير»** ولا تدخل أي مُجمَّع مالي |
+| «اقترب حولك الزكوي» | `hawlEndAt − today ≤ 14` | تنبيه بمعرّف حتمي (13) |
+| «حلّ حولك الزكوي» | `today >= hawlEndAt` واحتساب الحول غير موجود | يقترح إنشاء احتساب |
+| «سعر الغرام قديم» | `today − pricedAt > 30` على مسوَّدة قائمة | «سعر الغرام المُدخل عمره 45 يوماً. حدّثه قبل التأكيد.» |
+| الزكاة المدفوعة هذا الشهر | `periods/{pk}.expenseByCategory[charityCategoryId]` | **من الدفتر لا من سجل الزكاة** ⇒ لا ازدواج |
+
+---
+
+*(يتبع: 9 الإعدادات، 10 الشاشات ومصادرها، 11 قواعد الأمان، 12 الفهارس والتكلفة، 13 التنبيهات،
+14 الاختبارات، 15 الثوابت والقصور، 16 واجهة النطاق.)*

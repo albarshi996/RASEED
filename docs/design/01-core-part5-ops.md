@@ -1711,42 +1711,75 @@ tests/
 | `installments.property.ts` | `buildInstallmentPlan sums to the total for every count in 1..120` | 2.6 |
 | `invariants-after-sequence.property.ts` | `I1 I2 I4 I5 I6 I9 I17 I19 I20 I21 hold after any random 100-operation sequence` | الفحص الشامل |
 
-### 20.6 ربط الثوابت I1…I24 باختباراتها
+### 20.6 ربط الثوابت I1…I30 والحوارس G1…G12 باختباراتها
 
-> **نص الثوابت المُلزِم هو القسم 13.** الجدول أدناه يعيد صياغة كل ثابت باختصار **ليكون مقروءاً مستقلاً**،
-> ويربطه بموضع فرضه وباختباره. إن اختلف ترقيم القسم 13 بعد الدمج، **تُعاد مطابقة العمود الأول فقط**؛
-> الجُمل والاختبارات هي المرجع.
+> نص الثوابت المُلزِم هو **القسم 13**، ونص الحوارس **القسم 11**. الجدول أدناه يعيد صياغة كل ثابت
+> باختصار ليُقرأ مستقلاً، ويربطه بموضع فرضه وباختباره بالاسم الفعلي.
+> **بوابة CI:** أي ثابت `I1…I30` أو حارس `G1…G12` بلا اختبار يحمل اسمه **يُفشل البناء** —
+> الفحص يقرأ الجدول أدناه ويقارنه بقائمة الاختبارات المُجمَّعة.
 
 | الثابت | صياغته المختصرة | أين يُفرَض | الاختبار (الاسم الفعلي) |
 |---|---|---|---|
-| **I1** | `entry.debitTotalMinor === entry.creditTotalMinor` لكل قيد | **القواعد** + `planOperation` | `rules/entry-shape / an unbalanced entry is denied` · `unit/plan/balanced` · `property/plan-balanced` |
-| **I2** | `lines.length >= 2` وكل `amountMinor` عدد صحيح `> 0` | **القواعد** + النطاق | `rules/entry-shape / an entry with one line is denied` · `unit/plan/line-count` |
-| **I3** | `debitTotalMinor === Σ lines[side='debit'].amountMinor` (وكذلك الدائن) | النطاق فقط (القواعد بلا حلقات) | `unit/plan/balanced / every plan in the operations table is balanced` |
-| **I4** | ميزان المراجعة: `Σ accounts.debitTotalMinor === Σ accounts.creditTotalMinor` | الفاحص (16.2) | `integration/trial-balance` · `concurrency/two-ops-one-account / fifty parallel …` · `property/invariants-after-sequence` |
-| **I5** | `balanceMinor === openingBalanceMinor ± (debitTotal − creditTotal)` حسب `type` | **القواعد** | `rules/account-rules / a balanceMinor inconsistent with the totals is denied` · `property/ledger-replay` |
-| **I6** | `account.debitTotalMinor === Σ postings` غير المعكوسة المدينة لذلك الحساب | الفاحص (16.1) | `integration/fingerprint / a manually corrupted account total …` · `integration/rebuild` |
-| **I7** | `periodKey ≡ bookedAt[0:7]` دائماً (ADR-008) | **القواعد** | `rules/entry-shape / … periodKey mismatches bookedAt is denied` · `unit/period/period-key` · `property/period-key` |
-| **I8** | `accountPeriods` تحمل الحركة فقط — لا رصيد بداية ولا نهاية (ADR-009) | **القواعد** (مفاتيح بيضاء) | `rules/account-periods-rules / … closingBalanceMinor is denied` |
-| **I9** | `Σ accountPeriods[acc].debitMinor === account.debitTotalMinor` لكل حساب | الفاحص + إعادة البناء | `integration/rebuild / rebuildProjections restores every corrupted total` · `property/invariants-after-sequence` |
-| **I10** | `entryId === opId` (ADR-004) | **القواعد** | `rules/entry-shape / an entry whose id differs from opId is denied` · `integration/idempotency` |
-| **I11** | نفس `opId` بـ `payloadHash` مختلف ⇒ `OP_CONFLICT` | النطاق + الطبقة `data` | `integration/idempotency / … different payloadHash is rejected with OP_CONFLICT` |
-| **I12** | لا حذف لأي مستند مالي أبداً | **القواعد** | `rules/entry-immutable / deleting a journalEntry is denied` · `integration/no-delete` |
-| **I13** | القيد المرحَّل غير قابل للتعديل في كل حقوله المحاسبية | **القواعد** | `rules/entry-immutable` (4 اختبارات) · `rules/posting-shape / updating amountMinor … is denied` |
-| **I14** | العكس يقلب الجانب ولا يورّث تصنيفاً، ويوسم الأصل والـ postings بـ `reversed` | النطاق + **القواعد** (بوابة أحادية) | `unit/plan/reversal` · `integration/amend / … marks the original reversed on both …` |
-| **I15** | التعديل = عكس + بديل في معاملة واحدة، والأثر الصافي = الدلتا فقط (ADR-006) | الطبقة `data` | `integration/amend / … atomically` و`/ the net effect … equals the delta only` |
-| **I16** | قفل `entryCorrections/{originalEntryId}` يُنشأ مرة واحدة إلى الأبد (ADR-014) | **القواعد** | `rules/correction-lock-rules` · `concurrency/amend-race` |
-| **I17** | `obligation.remainingMinor === totalMinor + extraChargesMinor − paidMinor` و`0 ≤ paidMinor ≤ totalMinor + extraChargesMinor` | **القواعد** | `rules/obligation-rules` (2 اختبارات) · `unit/plan/over-settle-guard` |
-| **I18** | `obligation.totalMinor` لا يتغيّر بعد الإنشاء (ADR-012) | **القواعد** | `rules/obligation-rules / raising totalMinor is denied` · `integration/obligation-extra-charges` |
-| **I19** | `debt.remainingMinor === principalMinor − settledMinor` و`settledMinor ≤ principalMinor` | **القواعد** | `rules/debt-rules / settledMinor above principalMinor is denied` |
-| **I20** | `obligation.paidMinor === Σ settlementDeltaMinor` على الـ postings غير المعكوسة (ADR-021) | الفاحص (16.4) | `integration/obligation-payment / obligation paidMinor equals the sum of settlementDeltaMinor on postings` |
-| **I21** | `account.balanceMinor >= account.minBalanceMinor` بعد أي عملية (ADR-010) | **القواعد** + النطاق | `rules/account-rules / a balanceMinor below minBalanceMinor is denied` · `unit/plan/balance-guard` (اختباران) |
-| **I22** | `earmarkedMinor` مرآة مشتقة؛ تجاوز الحجز **تحذير** وتجاوز الرصيد **منع** (ADR-017) | النطاق | `unit/plan/earmark-guard` (اختباران) |
-| **I23** | كل أمر في `pendingCommands` مستبعد من كل رصيد وتقرير (ADR-007) | النطاق + الواجهة | `integration/pending-commands / a queued command is excluded from every balance and report` |
-| **I24** | لا قيد يتيم ولا posting يتيم: `entry.lineCount === count(postings)` ولكل posting قيد موجود | البنية + الفاحص (16.3) | `rules/entry-shape / … lineCount mismatches lines size is denied` · `integration/orphan-scan` (اختباران) |
+| **I1** | توازن القيد: `debitTotalMinor === creditTotalMinor` وسطران على الأقل | **القواعد** + `invariant` في `planOperation` | `rules/entry-shape / an unbalanced entry is denied` · `unit/plan/balanced` · `property/plan-balanced` |
+| **I2** | ميزان المراجعة العام: `Σ debitTotalMinor === Σ creditTotalMinor` على كل الحسابات | الفاحص (16.2 فحص 3) | `integration/trial-balance` · `concurrency/two-ops-one-account / fifty parallel …` |
+| **I3** | صافي الترحيلات صفر: `Σ debitMinor === Σ creditMinor` على كل `postings` | الفاحص (16.2 فحص 1) | `integration/fingerprint / a manually deleted posting is reported as unbalancedLedger` |
+| **I4** | الرصيد دالّة في الإجماليين حسب `normalSide` — **لا حقل `balanceMinor` مخزَّن** | البنية + **القواعد** (رفض المفتاح) | `rules/account-rules / an update carrying a stored balanceMinor key is denied` · `unit/reconcile/balance-of` |
+| **I5** | رصيد كل حساب = مجموع ترحيلاته في الدفتر؛ و`obligation.remainingMinor` = المعادلة | الفاحص (16.1) + **القواعد** (معادلة المتبقي) | `integration/fingerprint / a manually corrupted account total …` · `rules/obligation-rules / a remainingMinor that breaks the equation is denied` |
+| **I6** | `obligation.paidMinor === Σ settlementDeltaMinor` (ADR-021) | الفاحص (16.4) | `integration/obligation-payment / obligation paidMinor equals the sum of settlementDeltaMinor on postings` |
+| **I7** | `debt.settledMinor === Σ settlementDeltaMinor` | الفاحص (16.4) | `integration/debt-settlement / debt settledMinor equals the sum of settlementDeltaMinor on postings` |
+| **I8** | صفّ دلتاه ≠ 0 يحمل مرجعاً تشغيلياً **واحداً بالضبط** | **القواعد** | `rules/posting-shape / a non-zero settlement delta with both obligationId and debtId is denied` · `… with neither is denied` |
+| **I9** | لا سداد زائد: `paidMinor ≤ totalMinor + extraChargesMinor`، و`settledMinor ≤ principalMinor` | **القواعد** + الحارس G11 | `rules/obligation-rules / paidMinor above totalMinor plus extraChargesMinor is denied` · `rules/debt-rules / settledMinor above principalMinor is denied` · `unit/plan/over-settle-guard` |
+| **I10** | `totalMinor` لا يُرفع أبداً (ADR-012) | **القواعد** | `rules/obligation-rules / raising totalMinor is denied` · `integration/obligation-extra-charges` |
+| **I11** | لا قيد بلا ترحيلات ولا ترحيل يتيم: عدد الصفوف = `lines.length`، وكل مبلغ يطابق سطره | البنية (سطور مضمَّنة + معرّف حتمي) + `orphanScan` | `integration/orphan-scan / orphanScan finds an entry whose line count exceeds its posting count` · `… finds a posting whose entry is missing` · `… finds a posting whose amount mismatches its line` |
+| **I12** | مجموع الفترات = حركة الحساب الكلية | الفاحص + إعادة البناء | `integration/rebuild / rebuildProjections restores every corrupted total` · `property/invariants-after-sequence` |
+| **I13** | `periodKey ≡ bookedAt[0:7]` (ADR-008) | **القواعد** + الحارس G5 | `rules/entry-shape / an entry whose periodKey mismatches bookedAt is denied` · `unit/period/period-key` · `property/period-key` |
+| **I14** | العمليات المعلّقة خارج كل رصيد وتقرير (ADR-007) | النطاق + الواجهة | `integration/pending-commands / a queued command is excluded from every balance and report` |
+| **I15** | الحجز لا يتجاوز الرصيد — **تحذير لا منع** (ADR-017) | النطاق | `unit/plan/earmark-guard / exceeding earmarkedMinor yields a warning not a rejection` · `… exceeding the balance yields a rejection not a warning` |
+| **I16** | مرآة الحجز متوازنة: `Σ accounts.earmarkedMinor` = مجموع المخصَّص للأهداف والالتزامات | الفاحص | `integration/earmark-mirror / the sum of earmarked equals the sum of active earmarks` |
+| **I17** | زوج العكس مزدوج ومتكامل: `reversed === true` يقابله قيد `reversalOf` موجود | **القواعد** (بوابة أحادية) + النطاق | `rules/entry-immutable / setting reversed from true back to false is denied` · `integration/amend / … marks the original reversed` |
+| **I18** | لا عكس مزدوج، ولا عكس لقيد عكس | **القواعد** + `entryCorrections` | `rules/entry-immutable / reversing an entry of kind reversal is denied` · `concurrency/amend-race` |
+| **I19** | التحويل لا يحمل أي سطر على حساب دخل أو مصروف | النطاق + الاختبار الجدولي | `unit/plan/transfer / planTransfer touches two asset accounts and no income or expense account` · `integration/transfer / a transfer appears in no income or expense report query` |
+| **I20** | الاقتراض والإقراض لا يغيّران صافي الثروة | النطاق + الاختبار الجدولي | `unit/plan/debt-drawdown / planDebtDrawdown credits a liability account and debits cash, never an income account` · `integration/debt-settlement / registering a debt with no cash movement leaves every balance unchanged` |
+| **I21** | كل مبلغ عدد صحيح، ولا `NaN` ولا كسر عائم | **القواعد** (`is int`) + Zod (G3) | `rules/posting-shape / a posting with a non-integer amountMinor is denied` · `property/invariants-after-sequence` · `migrate/money-fields-are-integers` |
+| **I22** | كل مبلغ داخل `MAX_ABS_MINOR` | **القواعد** + `assertInRange` | `unit/money/arithmetic / addMinor throws above MAX_ABS_MINOR` · `unit/money/parse-amount / … returns OUT_OF_RANGE above MAX_ABS_MINOR` |
+| **I23** | `entryId === opId` (ADR-004) | **القواعد** | `rules/entry-shape / an entry whose id differs from opId is denied` · `integration/idempotency / replaying the same opId writes zero documents` |
+| **I24** | `payloadHash` حاسم للتعارض: نفس `opId` بحمولة مختلفة ⇒ `OP_ID_CONFLICT` | النطاق + الحارس G6 | `integration/idempotency / the same opId with a different payloadHash is rejected with OP_ID_CONFLICT` |
+| **I25** | لا قيد في فترة مُقفلة | الحارس G9 + **القواعد** (`lockedPeriods` تطول ولا تقصر) | `integration/period-lock / posting into a locked period is rejected with PERIOD_LOCKED` · `rules/settings-rules / shrinking lockedPeriods is denied` |
+| **I26** | سلسلة التصحيح متّسقة (ADR-014): `chainLength === chain.length` وتطول ولا تقصر | **القواعد** | `rules/correction-lock-rules / shrinking the correction chain is denied` · `rules/correction-lock-rules / updating or deleting a correction lock is denied` |
+| **I27** | `remainingMinor` مشتقّ: أي قراءة تحسبه ولا تثق بالمخزَّن وحده | **القواعد** (المعادلة) + الفاحص | `rules/obligation-rules / a remainingMinor that breaks the equation is denied` · `integration/rebuild / remaining is recomputed from the ledger` — **انظر ملاحظة التعارض أدناه** |
+| **I28** | حساب الضبط = مجموع الكيانات: رصيد `acc_liab_debts` = مجموع متبقّي الديون من نوعه | الفاحص | `integration/control-account / the debts control account equals the sum of outstanding debts` |
+| **I29** | لا كتابة مالية أثناء الصيانة (ADR-015) | **القواعد** (`rebuildIdle`) + الحارس G2 | `rules/rebuild-gate / creating a journalEntry while maintenance rebuild state is running is denied` · `concurrency/rebuild-vs-write` |
+| **I30** | القيد المرحَّل غير قابل للتغيير محاسبياً، و`postings` create-only | **القواعد** | `rules/entry-immutable` (4 اختبارات) · `rules/posting-shape / updating a posting is denied` · `integration/no-delete` |
 
-**خمسة ثوابت لا يحميها إلا الاختبار** (لا قاعدة ولا بنية): **I3، I11، I14 (جزء التصنيف)، I22، I23**.
-انخفاض تغطية الاختبارات عليها ليس «دَيناً تقنياً» بل **ثقب سلامة بيانات مباشر** — ولهذا بوابة التغطية
+**الحوارس G1…G12 — اختبار لكل حارس بالاسم:**
+
+| الحارس | رمز الخطأ | الاختبار |
+|---|---|---|
+| G1 | `AUTH_REQUIRED` / `NOT_OWNER` | `rules/closed-system / a signed-in user with a non-approved uid can read nothing` |
+| G2 | `MAINTENANCE_RUNNING` | `integration/rebuild / a financial write during maintenance is rejected with MAINTENANCE_RUNNING` |
+| G3 | `AMOUNT_NOT_INTEGER` / `AMOUNT_OUT_OF_RANGE` | `unit/validate/payload-schema` |
+| G4 | `BOOKED_AT_FUTURE` | `unit/plan/booked-at-guard / a bookedAt after today in Libya time is rejected` |
+| G5 | — (`invariant` ⇒ I13) | `unit/period/period-key` |
+| G6 | `OP_ID_CONFLICT` | `integration/idempotency` (اختباران) |
+| G7 | `ACCOUNT_NOT_FOUND` / `ACCOUNT_CLOSED` / `ACCOUNT_TYPE_MISMATCH` | `integration/account-guards` (ثلاثة اختبارات) |
+| G8 | `BOOKED_AT_BEFORE_OPENING` | `integration/account-guards / posting before the account opening date is rejected` |
+| G9 | `PERIOD_LOCKED` | `integration/period-lock` |
+| G10 | `BALANCE_BELOW_MIN` | `rules/account-rules / totals whose derived balance falls below minBalanceMinor are denied` · `unit/plan/balance-guard` (اختباران) |
+| G11 | `OVERPAYMENT` / `OVERCOLLECTION` | `unit/plan/over-settle-guard` · `rules/obligation-rules` · `rules/debt-rules` |
+| G12 | — (`invariant` ⇒ I1) | `unit/plan/balanced` · `property/plan-balanced` |
+
+**أربعة ثوابت لا يحميها إلا الاختبار** (لا قاعدة ولا بنية تمنعها): **I19، I20، I16، I24**.
+يُضاف إليها **خطأ اتجاه القيد** الذي لا يحميه أي ثابت على الإطلاق (18.1 بند 6).
+انخفاض التغطية عليها ليس «دَيناً تقنياً» بل **ثقب سلامة بيانات مباشر** — ولهذا بوابة التغطية
 في 20.0 صلبة وليست توصية.
+
+> **ملاحظة تعارض تُحسم عند الدمج (I27 مقابل القسم 4):**
+> القسم 13 يقول «`remainingMinor` مشتق لا مخزَّن»، والقسم 4 يُعرّفه حقلاً **مشتقاً ومخزَّناً** على
+> `Obligation` و`Debt`. هذا القسم يتبع القسم 4 (هو مرجع الحقول)، والقواعد في 14.2 **تفرض معادلته
+> من الخادم** — وهو ما يجعل التخزين آمناً: حقل مخزَّن بمعادلة مفروضة ليس «مصدر حقيقة ثانياً».
+> **المطلوب عند الدمج:** إعادة صياغة I27 إلى «`remainingMinor` مشتقّ مخزَّن ومعادلته مفروضة من
+> الخادم؛ **يُحرَّم** الاعتماد عليه كمصدر مستقل في أي فحص سلامة» — أو حذف الحقل من القسم 4.
+> **أحد الأمرين، لا الاثنان.**
 
 ---
 
