@@ -147,7 +147,7 @@ export function addMonths(
   policy: DayOfMonthPolicy = 'clampToEndOfMonth',
 ): ISODate {
   const { year, month, day } = splitISODate(date)
-  const totalMonths = (year * 12 + (month - 1)) + months
+  const totalMonths = year * 12 + (month - 1) + months
   const targetYear = Math.floor(totalMonths / 12)
   const targetMonth = (totalMonths % 12) + 1
   const limit = daysInMonth(targetYear, targetMonth)
@@ -161,7 +161,11 @@ export function addMonths(
   return `${pad4(targetYear)}-${pad2(targetMonth)}-${pad2(day)}` as ISODate
 }
 
-export function addYears(date: ISODate, years: number, policy: DayOfMonthPolicy = 'clampToEndOfMonth'): ISODate {
+export function addYears(
+  date: ISODate,
+  years: number,
+  policy: DayOfMonthPolicy = 'clampToEndOfMonth',
+): ISODate {
   return addMonths(date, years * 12, policy)
 }
 

@@ -58,7 +58,8 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
-          selector: "CallExpression[callee.object.name='Math'][callee.property.name=/^(round|floor|ceil|trunc)$/]",
+          selector:
+            "CallExpression[callee.object.name='Math'][callee.property.name=/^(round|floor|ceil|trunc)$/]",
           message:
             'ممنوع التقريب المباشر على المبالغ. استخدم دوال src/domain/money (splitEven · allocateByWeights · mulRate) التي تضمن انعدام ضياع الوحدات.',
         },
@@ -83,7 +84,19 @@ export default tseslint.config(
   {
     files: ['src/domain/**/*.{ts,tsx}'],
     rules: forbid(
-      ['firebase', 'firebase/*', '@firebase/*', '@/data', '@/data/*', '@/features', '@/features/*', '@/ui', '@/ui/*', '@/app', '@/app/*'],
+      [
+        'firebase',
+        'firebase/*',
+        '@firebase/*',
+        '@/data',
+        '@/data/*',
+        '@/features',
+        '@/features/*',
+        '@/ui',
+        '@/ui/*',
+        '@/app',
+        '@/app/*',
+      ],
       'طبقة domain نقية: ممنوع استيراد firebase أو data أو ui أو features. المنطق المحاسبي لا يعرف أين تُخزَّن البيانات.',
     ),
   },
@@ -101,7 +114,19 @@ export default tseslint.config(
   {
     files: ['src/ui/**/*.{ts,tsx}'],
     rules: forbid(
-      ['firebase', 'firebase/*', '@firebase/*', '@/data', '@/data/*', '@/features', '@/features/*', '@/app', '@/app/*', '@/domain/ops', '@/domain/ops/*'],
+      [
+        'firebase',
+        'firebase/*',
+        '@firebase/*',
+        '@/data',
+        '@/data/*',
+        '@/features',
+        '@/features/*',
+        '@/app',
+        '@/app/*',
+        '@/domain/ops',
+        '@/domain/ops/*',
+      ],
       'مكونات ui لا تجلب بيانات ولا تنفّذ عمليات. تستقبل props فقط (يُسمح باستيراد الأنواع من @/domain/types).',
     ),
   },
@@ -119,7 +144,18 @@ export default tseslint.config(
   {
     files: ['src/lib/**/*.{ts,tsx}'],
     rules: forbid(
-      ['@/domain', '@/domain/*', '@/data', '@/data/*', '@/features', '@/features/*', '@/ui', '@/ui/*', '@/app', '@/app/*'],
+      [
+        '@/domain',
+        '@/domain/*',
+        '@/data',
+        '@/data/*',
+        '@/features',
+        '@/features/*',
+        '@/ui',
+        '@/ui/*',
+        '@/app',
+        '@/app/*',
+      ],
       'طبقة lib أدوات عامة: لا تعرف شيئًا عن المجال. أي منطق مالي مكانه domain.',
     ),
   },

@@ -9,26 +9,14 @@
  * 3. **يُحرَّم إعادة حساب القسط الأخير بالطرح وقت السداد** — مصدر شائع لفروق الوحدة.
  */
 
-import {
-  addMonths,
-  addWeeks,
-  addYears,
-  type DayOfMonthPolicy,
-  type ISODate,
-} from '@/lib/time'
+import { addMonths, addWeeks, addYears, type DayOfMonthPolicy, type ISODate } from '@/lib/time'
 
 import { splitEven } from './allocate'
 import { invariant, ZERO, type Minor } from './types'
 
 export type InstallmentFrequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly'
 
-export type InstallmentStatus =
-  | 'upcoming'
-  | 'due'
-  | 'overdue'
-  | 'partiallyPaid'
-  | 'paid'
-  | 'cancelled'
+export type InstallmentStatus = 'upcoming' | 'due' | 'overdue' | 'partiallyPaid' | 'paid' | 'cancelled'
 
 export interface InstallmentPlanInput {
   totalMinor: Minor

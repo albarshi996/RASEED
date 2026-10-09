@@ -1,0 +1,430 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ══════════════════════════════════════════════════════════════════
+    // 0) دوال مساعدة — المصدر الوحيد لكل شرط في الملف
+    // ══════════════════════════════════════════════════════════════════
+
+    // ق-2: النظام مغلق على UIDs معتمدة. يُضاف UID احتياطي هنا عند الحاجة ثم يُعاد النشر.
+    function approvedUids() {
+      return [
+        'REPLACE_WITH_OWNER_UID'      // محمد إبراهيم البرشي — albarshi.96@gmail.com
+        // ,'REPLACE_WITH_BACKUP_UID' // UID احتياطي (قرار مفتوح — القسم 22 بند م-3)
+      ];
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    // المالك = موقَّع الدخول + UID معتمد + يكتب داخل نطاقه هو.
+    // الشروط الثلاثة مجتمعة: أحدها وحده لا يكفي.
+    function isOwner(uid) {
+      return isSignedIn()
+          && request.auth.uid == uid
+          && request.auth.uid in approvedUids();
+    }
+
+    // MAX_ABS_MINOR = 1_000_000_000_000 (القسم 2.1). موقَّع: الأرصدة قد تكون سالبة (ADR-010).
+    function isMoney(v) {
+      return v is int && v >= -1000000000000 && v <= 1000000000000;
+    }
+
+    // مبلغ سطر/دفعة: عدد صحيح موجب حصراً (الثابت I2).
+    function isPosMoney(v) {
+      return v is int && v > 0 && v <= 1000000000000;
+    }
+
+    function isNonNegMoney(v) {
+      return v is int && v >= 0 && v <= 1000000000000;
+    }
+
+    // المفاتيح التي تغيّرت في هذا التحديث لا تخرج عن القائمة المسموحة.
+    function hasOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // أيٌّ من هذه المفاتيح لم يتغيّر إطلاقاً. تُستخدم للحقول المحاسبية المحصّنة.
+    function unchanged(keys) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
+    }
+
+    // بوابة مستند جديد: لا مفاتيح مجهولة، وكل المفاتيح الإلزامية حاضرة.
+    function shapeIs(required, optional) {
+      return request.resource.data.keys().hasAll(required)
+          && request.resource.data.keys().hasOnly(required.concat(optional));
+    }
+
+    function isDate(s)      { return s is string && s.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'); }
+    function isPeriodKey(s) { return s is string && s.matches('^[0-9]{4}-[0-9]{2}$'); }
+
+    // ADR-008: periodKey ≡ bookedAt[0:7] دائماً، بلا استثناء وبلا إعداد.
+    function periodMatchesDate(d) {
+      return isDate(d.bookedAt) && isPeriodKey(d.periodKey) && d.periodKey == d.bookedAt[0:7];
+    }
+
+    function baseDocOk(uid) {
+      return request.resource.data.ownerUid == uid
+          && request.resource.data.schemaVersion is int
+          && request.resource.data.schemaVersion >= 1;
+    }
+
+    // ADR-015: بوابة إعادة البناء. تُستدعى **بعد** فشل المسار الطبيعي فقط (|| يقصّر دائرته)،
+    // فلا تُحمَّل قراءة إضافية على كل عملية مالية عادية.
+    function rebuildActive(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid)/rebuildJobs/active);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 1) مستند المستخدم نفسه — لا يحمل مالاً، ولا ينشر صلاحيته لما تحته
+    // ══════════════════════════════════════════════════════════════════
+    // هذه الكتلة تطابق مستند users/{uid} **وحده**. لا {document=**}، فلا انتشار.
+    match /users/{uid} {
+      allow get:    if isOwner(uid);
+      allow create: if isOwner(uid) && request.resource.data.uid == uid;
+      allow update: if isOwner(uid) && unchanged(['uid', 'createdAt']);
+      allow delete: if false;                         // لا حذف حساب من العميل
+
+      // ──────────────────────────────────────────────────────────────
+      // 2) journalEntries — القيود. تُنشأ ولا تُمسّ محاسبياً ولا تُحذف.
+      // ──────────────────────────────────────────────────────────────
+      match /journalEntries/{entryId} {
+
+        allow get, list: if isOwner(uid);
+
+        allow create: if isOwner(uid)
+          && baseDocOk(uid)
+          && (
+               // ADR-004: المعرّف = opId. منع الازدواج خصيصة في المفتاح لا منطق تطبيقي.
+               entryId == request.resource.data.opId
+            && request.resource.data.entryId == entryId
+            && request.resource.data.payloadHash is string
+            && request.resource.data.payloadHash.size() == 64
+            && request.resource.data.currency == 'LYD'
+            && request.resource.data.status == 'posted'        // لا تُنشأ قيود بحالة أخرى
+            && request.resource.data.reversed == false         // قيد جديد غير معكوس بحكم التعريف
+            && request.resource.data.kind is string
+            && periodMatchesDate(request.resource.data)        // ← ADR-008 مفروض من الخادم
+            && request.resource.data.lines is list
+            && request.resource.data.lines.size() >= 2
+            && request.resource.data.lines.size() <= 20
+            && request.resource.data.lineCount == request.resource.data.lines.size()
+            && isPosMoney(request.resource.data.debitTotalMinor)
+            // ← الثابت I1 مفروض من الخادم: Σ Dr = Σ Cr
+            && request.resource.data.debitTotalMinor == request.resource.data.creditTotalMinor
+            && request.resource.data.accountIds is list
+            && request.resource.data.accountIds.size() >= 2
+            && request.resource.data.accountIds.size() <= 20
+            && request.resource.data.description is string
+            && request.resource.data.description.size() > 0
+            && request.resource.data.description.size() <= 500
+            // ADR-010: لا أثر لـ allowNegative في المخطط. مستند يحمله = مستند من إصدار محظور.
+            && !request.resource.data.keys().hasAny(['allowNegative'])
+            // ADR-015: لا تُنشأ قيود أثناء إعادة البناء — تُغلق نافذة الكتابة المفقودة.
+            && !rebuildActive(uid)
+          );
+
+        // التعديل المسموح وحيد الاتجاه: وسم القيد معكوساً، ووصف/وسوم غير محاسبية.
+        allow update: if isOwner(uid)
+          && hasOnly(['reversed', 'reversedByEntryId', 'replacedByEntryId',
+                      'correctionGroupId', 'description', 'tags', 'attachmentIds', 'updatedAt'])
+          && unchanged(['entryId', 'opId', 'payloadHash', 'kind', 'status', 'bookedAt',
+                        'periodKey', 'lines', 'lineCount', 'accountIds',
+                        'debitTotalMinor', 'creditTotalMinor', 'currency',
+                        'ownerUid', 'createdAt'])
+          // `reversed` بوابة أحادية: false → true فقط. لا «فكّ عكس».
+          && (!request.resource.data.reversed || resource.data.reversed == false)
+          && (resource.data.reversed == false || request.resource.data.reversed == true)
+          // قيد العكس نفسه لا يُعكَس (منعاً لسلاسل العكس اللانهائية)
+          && resource.data.kind != 'reversal';
+
+        allow delete: if false;                       // **لا حذف مالي مطلقاً**
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 3) postings — الإسقاط المسطَّح. المعرّف مشتق من القيد ⇒ idempotent.
+      // ──────────────────────────────────────────────────────────────
+      match /postings/{postingId} {
+
+        allow get, list: if isOwner(uid);
+
+        allow create: if isOwner(uid)
+          && baseDocOk(uid)
+          && (
+               // postingId = `${entryId}__${lineIndex}` — إعادة المحاولة تكتب نفس المستند.
+               postingId.split('__')[0] == request.resource.data.entryId
+            && request.resource.data.lineIndex is int
+            && request.resource.data.lineIndex >= 0
+            && postingId == request.resource.data.entryId + '__' + string(request.resource.data.lineIndex)
+            && request.resource.data.accountId is string
+            && request.resource.data.side in ['debit', 'credit']
+            && isPosMoney(request.resource.data.amountMinor)
+            && periodMatchesDate(request.resource.data)
+            && request.resource.data.reversed == false
+            // ADR-021: الدلتا التشغيلية موقَّعة وقد تكون صفراً (قيد لا يسوّي شيئاً).
+            && isMoney(request.resource.data.settlementDeltaMinor)
+            && !request.resource.data.keys().hasAny(['allowNegative'])
+            && !rebuildActive(uid)
+          );
+
+        allow update: if isOwner(uid)
+          && hasOnly(['reversed', 'reversedByEntryId', 'updatedAt'])
+          && unchanged(['entryId', 'lineIndex', 'accountId', 'side', 'amountMinor',
+                        'bookedAt', 'periodKey', 'settlementDeltaMinor', 'ownerUid'])
+          && (!request.resource.data.reversed || resource.data.reversed == false);
+
+        allow delete: if false;
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 4) accounts — المُجمَّع. الإجماليات تنامٍ محض، والرصيد متماسك معها.
+      // ──────────────────────────────────────────────────────────────
+      match /accounts/{accountId} {
+
+        allow get, list: if isOwner(uid);
+
+        allow create: if isOwner(uid)
+          && baseDocOk(uid)
+          && (
+               request.resource.data.type in ['asset', 'liability', 'equity', 'income', 'expense']
+            && request.resource.data.currency == 'LYD'
+            && request.resource.data.code is string
+            && request.resource.data.debitTotalMinor == 0
+            && request.resource.data.creditTotalMinor == 0
+            && isMoney(request.resource.data.openingBalanceMinor)
+            && request.resource.data.balanceMinor == request.resource.data.openingBalanceMinor
+            && request.resource.data.earmarkedMinor == 0
+            // ADR-010: حدّ موقَّع، افتراضي 0. ولا وجود لـ allowNegative في المخطط.
+            && isMoney(request.resource.data.minBalanceMinor)
+            && !request.resource.data.keys().hasAny(['allowNegative'])
+          );
+
+        allow update: if isOwner(uid)
+          && unchanged(['type', 'code', 'currency', 'openingBalanceMinor', 'ownerUid', 'createdAt'])
+          && isMoney(request.resource.data.balanceMinor)
+          && isNonNegMoney(request.resource.data.debitTotalMinor)
+          && isNonNegMoney(request.resource.data.creditTotalMinor)
+          && isNonNegMoney(request.resource.data.earmarkedMinor)
+          && isMoney(request.resource.data.minBalanceMinor)
+          // ثابت داخل المستند تفرضه القواعد فعلاً (I5): الرصيد = الافتتاحي ± الإجماليات
+          && request.resource.data.balanceMinor == (
+               request.resource.data.type in ['asset', 'expense']
+                 ? request.resource.data.openingBalanceMinor
+                   + request.resource.data.debitTotalMinor - request.resource.data.creditTotalMinor
+                 : request.resource.data.openingBalanceMinor
+                   + request.resource.data.creditTotalMinor - request.resource.data.debitTotalMinor
+             )
+          // حارس الرصيد (I21) — مفروض من الخادم لأن الطرفين في نفس المستند
+          && request.resource.data.balanceMinor >= request.resource.data.minBalanceMinor
+          && (
+               // المسار الطبيعي: الإجماليات لا تنقص أبداً (حتى العكس يضيف سطراً مقابلاً)
+               (   request.resource.data.debitTotalMinor  >= resource.data.debitTotalMinor
+                && request.resource.data.creditTotalMinor >= resource.data.creditTotalMinor )
+               // ADR-015: مسار إعادة البناء بقيم مطلقة — مسموح بالنقصان ببوابة صريحة فقط.
+               // `||` تقصّر دائرتها ⇒ exists() لا يُستدعى في المسار الطبيعي ⇒ لا قراءة إضافية.
+            || rebuildActive(uid)
+          );
+
+        allow delete: if false;                       // الأرشفة بـ status لا الحذف
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 5) accountPeriods — حركة فقط (ADR-009). لا رصيد بداية ولا نهاية.
+      //    المعرّف: `${accountId}__${periodKey}`
+      // ──────────────────────────────────────────────────────────────
+      match /accountPeriods/{apId} {
+
+        allow get, list: if isOwner(uid);
+
+        // قائمة المفاتيح البيضاء هي **الآلية التي تمنع عودة العيب القاتل**:
+        // أي مستند يحمل openingBalanceMinor أو closingBalanceMinor يُرفض من الخادم.
+        allow create: if isOwner(uid)
+          && baseDocOk(uid)
+          && shapeIs(['ownerUid', 'schemaVersion', 'accountId', 'periodKey',
+                      'debitMinor', 'creditMinor', 'entryCount'],
+                     ['updatedAt', 'createdAt'])
+          && apId == request.resource.data.accountId + '__' + request.resource.data.periodKey
+          && isPeriodKey(request.resource.data.periodKey)
+          && isNonNegMoney(request.resource.data.debitMinor)
+          && isNonNegMoney(request.resource.data.creditMinor)
+          && request.resource.data.entryCount is int
+          && request.resource.data.entryCount >= 0;
+
+        allow update: if isOwner(uid)
+          && hasOnly(['debitMinor', 'creditMinor', 'entryCount', 'updatedAt'])
+          && isNonNegMoney(request.resource.data.debitMinor)
+          && isNonNegMoney(request.resource.data.creditMinor)
+          && (
+               (   request.resource.data.debitMinor  >= resource.data.debitMinor
+                && request.resource.data.creditMinor >= resource.data.creditMinor )
+            || rebuildActive(uid)
+          );
+
+        allow delete: if isOwner(uid) && rebuildActive(uid);   // تنظيف فترة شاذة أثناء البناء فقط
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 6) entryCorrections/{originalEntryId} — قفل تصحيح. مرة واحدة إلى الأبد (ADR-014).
+      // ──────────────────────────────────────────────────────────────
+      match /entryCorrections/{originalEntryId} {
+        allow get, list: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && baseDocOk(uid)
+          && shapeIs(['ownerUid', 'schemaVersion', 'originalEntryId', 'reversalEntryId',
+                      'replacementEntryId', 'correctionGroupId', 'reason', 'at'],
+                     [])
+          && request.resource.data.originalEntryId == originalEntryId
+          && request.resource.data.reason is string
+          && request.resource.data.reason.size() > 0;
+        allow update, delete: if false;               // القفل لا يُفتح ولا يُحدَّث
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 7) obligations — ADR-011 / ADR-012
+      // ──────────────────────────────────────────────────────────────
+      match /obligations/{obligationId} {
+
+        allow get, list: if isOwner(uid);
+
+        allow create: if isOwner(uid)
+          && baseDocOk(uid)
+          && isPosMoney(request.resource.data.totalMinor)
+          && request.resource.data.extraChargesMinor == 0
+          && request.resource.data.paidMinor == 0
+          && request.resource.data.remainingMinor == request.resource.data.totalMinor
+          // ADR-011: قسط القرض ليس مصروفاً — الطبيعة إلزامية عند الإنشاء ولا افتراضي لها.
+          && request.resource.data.nature in ['expense', 'financing']
+          && isDate(request.resource.data.dueDate);
+
+        allow update: if isOwner(uid)
+          // ADR-012: totalMinor **لا يُرفع أبداً**. الزيادة تذهب إلى extraChargesMinor.
+          && unchanged(['totalMinor', 'nature', 'ownerUid', 'createdAt'])
+          && isNonNegMoney(request.resource.data.extraChargesMinor)
+          && isNonNegMoney(request.resource.data.paidMinor)
+          // منع السداد الزائد (I17) — مفروض من الخادم
+          && request.resource.data.paidMinor <=
+             request.resource.data.totalMinor + request.resource.data.extraChargesMinor
+          && request.resource.data.remainingMinor ==
+             request.resource.data.totalMinor + request.resource.data.extraChargesMinor
+             - request.resource.data.paidMinor
+          // paidMinor لا ينقص إلا بإلغاء دفعة (عكس) — والعكس يمرّ من نفس المسار بدلتا سالبة،
+          // فلا نفرض التنامي هنا؛ نفرض السقف والمعادلة فقط.
+          && request.resource.data.status in
+             ['upcoming', 'due', 'overdue', 'partiallyPaid', 'paid', 'cancelled'];
+
+        allow delete: if false;
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 8) debts
+      // ──────────────────────────────────────────────────────────────
+      match /debts/{debtId} {
+        allow get, list: if isOwner(uid);
+
+        allow create: if isOwner(uid)
+          && baseDocOk(uid)
+          && isPosMoney(request.resource.data.principalMinor)
+          && request.resource.data.settledMinor == 0
+          && request.resource.data.remainingMinor == request.resource.data.principalMinor
+          && request.resource.data.direction in ['payable', 'receivable'];
+
+        allow update: if isOwner(uid)
+          && unchanged(['principalMinor', 'direction', 'ownerUid', 'createdAt'])
+          && isNonNegMoney(request.resource.data.settledMinor)
+          && request.resource.data.settledMinor <= request.resource.data.principalMinor
+          && request.resource.data.remainingMinor ==
+             request.resource.data.principalMinor - request.resource.data.settledMinor
+          && !request.resource.data.keys().hasAny(['allowOverSettle']);
+
+        allow delete: if false;
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 9) budgets / financialGoals — توقعات، لا مال فعلي
+      // ──────────────────────────────────────────────────────────────
+      match /budgets/{budgetId} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && baseDocOk(uid)
+          && isNonNegMoney(request.resource.data.limitMinor)
+          && isNonNegMoney(request.resource.data.spentMinor)
+          && isPeriodKey(request.resource.data.periodKey);
+        allow delete: if isOwner(uid);                // الميزانية ليست قيداً مالياً
+      }
+
+      match /financialGoals/{goalId} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && baseDocOk(uid)
+          && isPosMoney(request.resource.data.targetMinor)
+          && isNonNegMoney(request.resource.data.savedMinor)
+          && isNonNegMoney(request.resource.data.earmarkedMinor);
+        allow delete: if isOwner(uid);
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 10) pendingCommands — طابور محلي (ADR-007). ليس دفتراً ⇒ الحذف مسموح.
+      // ──────────────────────────────────────────────────────────────
+      match /pendingCommands/{opId} {
+        allow get, list: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && baseDocOk(uid)
+          && opId == request.resource.data.opId
+          && request.resource.data.status in ['queued', 'inflight', 'failed']
+          && request.resource.data.payloadHash is string;
+        allow update: if isOwner(uid)
+          && unchanged(['opId', 'payloadHash', 'ownerUid', 'createdAt'])
+          && request.resource.data.status in ['queued', 'inflight', 'failed'];
+        allow delete: if isOwner(uid);                // يُحذف عند نجاح الترحيل
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 11) rebuildJobs — بوابة ADR-015. `active` معرّف محجوز.
+      // ──────────────────────────────────────────────────────────────
+      match /rebuildJobs/{jobId} {
+        allow get, list: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && baseDocOk(uid)
+          && shapeIs(['ownerUid', 'schemaVersion', 'jobId', 'scope', 'startedAt',
+                      'cursorPostingId', 'processedCount', 'phase'], ['note'])
+          && request.resource.data.phase in ['scanning', 'applying'];
+        allow update: if isOwner(uid)
+          && hasOnly(['cursorPostingId', 'processedCount', 'phase', 'note']);
+        allow delete: if isOwner(uid);                // الحذف = إغلاق البوابة وإنهاء الإجراء
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 12) auditLogs — إلحاق فقط. لا تحديث ولا حذف، للمالك أيضاً.
+      // ──────────────────────────────────────────────────────────────
+      match /auditLogs/{logId} {
+        allow get, list: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && baseDocOk(uid)
+          && request.resource.data.action is string
+          && request.resource.data.at is string;
+        allow update: if false;                       // ← لا يُكتب على سجل تدقيق
+        allow delete: if false;
+      }
+
+      // ──────────────────────────────────────────────────────────────
+      // 13) settings — إعدادات عرض، لا مال
+      // ──────────────────────────────────────────────────────────────
+      match /settings/{docId} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid) && baseDocOk(uid);
+        allow delete: if false;
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 14) حرّاسة نهائية — توثيقية وتشغيلية (14.1 قاعدة 3)
+    // أي مسار لم يُعدّ أعلاه مرفوض افتراضياً. هذه الكتلة تجعل الرفض **مقصوداً ومرئياً**،
+    // وتُجبر أي مجموعة جديدة على المرور بمراجعة أمنية قبل أن تعمل.
+    // ══════════════════════════════════════════════════════════════════
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

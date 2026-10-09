@@ -466,3 +466,1457 @@ notificationId = `notif:hhBudget:${periodKey}:${thresholdPercent}`
 | **T-HH-6** | فئة تحت `expense.home` بلا وسم ⇒ الوسم يُضاف تلقائياً (M-I2) |
 | **T-HH-7** | ميزانية منزل 500 ومصروف منزلي 410 ⇒ تنبيه واحد عند 80%؛ تشغيل المُستجيب 50 مرة ⇒ **إشعار واحد** بالمعرّف الحتمي |
 | **T-HH-8** | دفع التزام منزلي `nature='expense'` موسوم `household` ⇒ `householdExpenseMinor += X`؛ وبـ `nature='financing'` ⇒ **لا يزيد** `householdExpenseMinor` ولا `totalExpenseMinor` |
+
+---
+
+## 6. التزام مقابل دين — الفرق الدقيق والجسر بينهما
+
+### 6.1 الفرق الاقتصادي في سطر واحد
+
+> **الالتزام (`obligations`) = مبلغ أتوقّع أن أدفعه في موعد.** لم يُستهلك شيء ولم يُستلم شيء بعد.
+> **الدين عليّ (`debts.direction='payable'`) = مبلغ أنا مدين به الآن.** القيمة انتقلت فعلاً
+> (نقداً استلمته، أو سلعة/خدمة استهلكتها بالأجل).
+
+**والفارق في النظام ليس وصفياً بل بنيوي:**
+
+| | الالتزام | الدين |
+|---|---|---|
+| **قيد عند الإنشاء؟** | **لا — إطلاقاً** (R4) | **نعم** (R6) |
+| **حساب في شجرة الحسابات؟** | **لا** | **نعم**: `liability.payable.{contactId}` أو `asset.receivable.{contactId}` |
+| **يدخل صافي الثروة؟** | **لا** (لا قيد ⇒ لا خصم محاسبي) | **نعم** (خصم/أصل حقيقي) |
+| **مصدر رقمه في لوحة التحكم** | `obligations` (استعلام على المستندات) | `accounts` (مجموع أرصدة حسابات الديون) |
+| **التكرار** | نعم، عبر `recurrences` بمعرّف حتمي `obl:{recurrenceId}:{dueDate}` | لا — الدين حدث مرة واحدة، وأقساطه `installments[]` |
+| **الحالة** | دالّة في **التاريخ** (`upcoming/due/overdue`) — §10.2 | دالّة في **المسدَّد** (`open/partiallySettled/settled`) — §10.3 |
+| **الحذف** | `allow delete: if false` — إلغاء فقط | `allow delete: if false` — إلغاء بشرط `settlementCount == 0` |
+
+### 6.2 جدول التمييز العملي
+
+| الحالة الواقعية | التصنيف | الكيان | القيد عند النشوء | `nature`/`direction` |
+|---|---|---|---|---|
+| إيجار المنزل الشهري 800 د.ل | **التزام متكرر** | `obligations` + `recurrences` | ✗ لا قيد | `nature: 'expense'` |
+| فاتورة كهرباء متغيرة | **التزام متكرر متغيّر** | `obligations` بـ `isVariableAmount: true` | ✗ | `nature: 'expense'` |
+| اشتراك إنترنت شهري | **التزام متكرر** | `obligations` + `recurrences` | ✗ | `nature: 'expense'` |
+| **1000 د.ل اقترضتها نقداً من صديق** | **دين عليّ** | `debts` | ✅ `Dr asset.cash / Cr liability.payable.{c}` | `direction: 'payable'`, `createdCash: true` |
+| شراء ثلاجة بالأجل 1500 د.ل | **دين عليّ** | `debts` | ✅ `Dr expense.shopping / Cr liability.payable.{c}` — R6(ب) | `direction: 'payable'`, `createdCash: false` |
+| قرض سيارة بـ 60 قسطاً | **الاثنان**: الدين هو الأصل، والأقساط التزامات تمويلية | `debts` (الأصل) + `obligations` لكل دورة | الدين: ✅ ؛ كل دورة: ✗ | الدين `payable` ؛ الالتزام `nature: 'financing'` |
+| قسط قرض شهري أدفعه | **التزام تمويلي** | `obligations` | ✗ | **`nature: 'financing'`** ⇒ الدفع **ليس مصروفاً** (ADR-011) |
+| دين قديم عليّ قبل استخدام النظام | **دين افتتاحي** | `debts` | ✅ `Dr equity.opening / Cr liability.payable.{c}` — R6(ج) | `direction: 'payable'`, `createdCash: false` |
+| 500 د.ل أقرضتها لشخص | **دين لي** | `debts` | ✅ `Dr asset.receivable.{c} / Cr asset.cash` | `direction: 'receivable'` |
+| راتب الخدمة المنزلية الشهري | **التزام متكرر** | `obligations` | ✗ | `nature: 'expense'` |
+| زكاة مُحتسبة لم تُدفع | **خصم مستحق — لا التزام ولا دين** | `zakatRecords` + قيد `zakatAccrual` | ✅ `Dr equity.unallocated / Cr liability.zakat` | — |
+
+### 6.3 شجرة القرار (تُطبَّق في الواجهة عند «إضافة جديد»)
+
+```mermaid
+flowchart TD
+  S["مبلغ سأدفعه لجهة"] --> Q1{"هل انتقلت القيمة إليّ فعلاً؟<br/>نقد استلمته أو سلعة استهلكتها"}
+
+  Q1 -->|"لا — موعد مستقبلي فقط"| Q2{"يتكرر بدورية؟"}
+  Q2 -->|"نعم"| O1["obligations + recurrences<br/>لا قيد عند الإنشاء"]
+  Q2 -->|"لا — مرة واحدة بموعد"| O2["obligations بلا recurrence<br/>لا قيد"]
+  O1 --> Q3{"الدفع يستهلك ميزانية؟"}
+  O2 --> Q3
+  Q3 -->|"نعم — إيجار أو فاتورة أو اشتراك"| N1["nature = expense<br/>الدفع: Dr expense.cat"]
+  Q3 -->|"لا — قسط قرض أو سيارة"| N2["nature = financing<br/>الدفع: Dr liability.financing<br/>لا مصروف ولا ميزانية"]
+
+  Q1 -->|"نعم"| Q4{"ماذا استلمت؟"}
+  Q4 -->|"نقداً"| D1["debts payable · createdCash=true<br/>Dr asset.A / Cr liability.payable.c<br/>النقد يرتفع والخصوم ترتفع — ليس دخلاً"]
+  Q4 -->|"سلعة أو خدمة بالأجل"| D2["debts payable · createdCash=false<br/>Dr expense.cat / Cr liability.payable.c<br/>مصروف حقيقي بلا نقد"]
+  Q4 -->|"دين قائم قبل النظام"| D3["debts payable افتتاحي<br/>Dr equity.opening / Cr liability.payable.c"]
+
+  D1 --> Q5{"يُسدَّد بأقساط بمواعيد؟"}
+  Q5 -->|"نعم"| B1["الدين هو الأصل والأقساط إما<br/>installments داخل الدين — المعتمد<br/>أو obligations nature=financing للقرض المؤسسي"]
+  Q5 -->|"لا"| B2["سداد حرّ متى توفّر المال"]
+```
+
+### 6.4 الجسر: التزام تأخّر وتحوّل إلى دين
+
+**السؤال الواقعي:** لم أدفع إيجار أكتوبر 800 د.ل، وصاحب العقار قال «اعتبرها ديناً عليك وسدّدها على
+دفعتين». ما الذي يحدث في النظام؟
+
+**الحقيقة الاقتصادية:** تغيّر **جوهري** لا تجميلي. قبل الاتفاق كان المبلغ **توقّعاً** (التزام)؛ بعده
+صار **مديونية قائمة** معترفاً بها (دين) — والسكن استُهلك فعلاً. وهذا بالضبط **R6(ب)**: استهلاك بالأجل.
+
+> ### القرار: عملية صريحة واحدة بقرار المستخدم، ذرّية، **ولا تحويل تلقائي أبداً**.
+
+```ts
+// 〔جديد〕 إضافة إلى OperationRequest — تحتاج ADR-023
+export interface ConvertObligationToDebtRequest {
+  type: 'convertObligationToDebt';
+  opId: string;                       // حتمي: `oblconv:${obligationId}` ⇒ تحويل واحد إلى الأبد
+  obligationId: string;
+  /** إلزامي: الدائن. يُشتقّ من obligation.payeeContactId إن وُجد، وإلا يُطلب صراحةً. */
+  creditorContactId: string;
+  /** المبلغ المحوَّل. الافتراضي والأقصى = remaining المحسوب. لا تجاوز. */
+  principalMinor: Minor;
+  bookedAt: DateKey;                  // تاريخ الاعتراف بالدين (تاريخ الاتفاق)
+  expectedSettleAt?: DateKey;
+  installments?: InstallmentPlanInput;
+  reason: string;                     // إلزامي 5..500 — يُكتب في auditLogs وفي الطرفين
+}
+```
+
+**الخوارزمية — معاملة واحدة:**
+
+```
+reads:
+  E   ← journalEntries/{opId}                                 منع الازدواج
+  O   ← obligations/{obligationId}
+  C   ← accounts/{expenseAccountOf(O.categoryId)}             إن nature=='expense'
+        أو accounts/{O.financingAccountId}                    إن nature=='financing'
+  P   ← accounts/{liability.payable.{creditorContactId}}      قد يكون غير موجوداً
+  B   ← budgetPeriods/{pk} ; L ← periodLocks/{pk} ; M ← meta/integrity
+
+decide:
+  if M.rebuildStatus=='running'                → err REBUILD_IN_PROGRESS
+  if E exists                                  → alreadyApplied / OP_ID_CONFLICT
+  if L exists                                  → err PERIOD_LOCKED
+  if O.status ∈ {paid, cancelled}              → err OBLIGATION_NOT_CONVERTIBLE   〔جديد〕
+  remaining = O.totalMinor + O.extraChargesMinor − O.paidMinor      // محسوب لا مقروء
+  if principalMinor > remaining                 → err OVERPAYMENT
+  if principalMinor <= 0                        → err NON_POSITIVE_AMOUNT
+  assertNonEmpty(reason)
+  if P missing: newAccounts += buildAccount(`liability.payable.{creditorContactId}`)
+
+  // القيد = R6(ب) بالضبط: اعتراف باستهلاك بالأجل.  kind = 'borrow'
+  lines = O.nature == 'expense'
+    ? [ Dr expense.{O.categoryId}        principalMinor ,
+        Cr liability.payable.{creditor}  principalMinor ]
+    : [ Dr liability.financing.{payee}   principalMinor ,   // الخصم التمويلي ينقص
+        Cr liability.payable.{creditor}  principalMinor ]   // ويُنقل إلى دائن شخصي
+  refs = { obligationId, debtId: newDebtId, debtDirection: 'payable' }
+  tags = O.tags        // يُورَّث وسم النطاق ⇒ لا يفقد تقرير المنزل المبلغ
+
+writes (معاملة واحدة):
+  1 create accounts/{liability.payable.{creditor}}   إن لم يوجد
+  2 create journalEntries/{opId} + postings ×2
+  3 create debts/{newDebtId} {
+        direction:'payable', counterpartyContactId:creditorContactId,
+        accountId: liability.payable.{creditor},
+        principalMinor, settledMinor:0, remainingMinor:principalMinor, writtenOffMinor:0,
+        createdCash:false, originatedAt:bookedAt, expectedSettleAt?, installments?,
+        status:'open', settlementCount:0, allowOverSettle:false,
+        notes: `محوَّل من التزام ${O.name} (${obligationId}) — ${reason}` }
+  4 update obligations/{obligationId} {
+        paidMinor: O.paidMinor,          ← **لا يتغيّر: لم يُدفع شيء**
+        status: 'cancelled',             ← يخرج من «القادمة» و«المتأخرة»
+        notes: O.notes + `\nمحوَّل إلى دين ${newDebtId} بتاريخ ${bookedAt}` }
+  5 update accounts:  expense.{cat} +principal   (أو liability.financing −principal)
+                      liability.payable.{creditor} +principal
+  6 set accountPeriods ×2  +  periods/{pk}:
+        nature=='expense' ? { totalExpenseMinor:+principal,
+                              'expenseByCategory.{cat}':+principal,
+                              householdExpenseMinor: tags∋'household' ? +principal : — ,
+                              borrowedMinor:+principal }
+                          : { borrowedMinor:+principal }      // تمويلي ⇒ لا مصروف
+        // netCashFlowMinor **لا يتغيّر** — لم يتحرك أي نقد
+  7 if nature=='expense' AND B وفئته موجودان: budgetPeriods (قيم مطلقة + منطق التنبيه)
+  8 create auditLogs { action:'obligationConvertedToDebt', before:O, after, reason }   〔جديد〕
+  9 create notifications «حُوِّل التزام {name} إلى دين على {creditor}»
+```
+
+**البدائل المرفوضة:**
+
+| البديل | سبب الرفض الحاسم |
+|---|---|
+| **تحويل تلقائي عند `overdue`** | (1) **ازدواج مباشر:** الالتزام يبقى في `where remainingMinor > 0` ⇒ «إجمالي المستحق» **1600 بدل 800**. (2) اعتراف محاسبي بالأجل **بلا قرار المستخدم** ⇒ يرفع «مصروفات الشهر» بلا أي مال خرج، وهو **عين ما رفضه R4** حين رفض قيد الاستحقاق. (3) كل فاتورة تتأخر يومين تُنشئ ديناً وجهة اتصال ⇒ ضجيج لا يُحتمل |
+| **إنشاء الدين وترك الالتزام مفتوحاً** | ازدواج في «إجمالي المستحق» وفي «المتأخرة»، وتنبيهان لنفس المبلغ |
+| **إغلاق الالتزام بحالة `paid`** | **كذب محاسبي:** `paidMinor` يعني مالاً خرج. يُفسد **I5b** (`Σ settlementDeltaMinor ≠ paidMinor`) ⇒ الفاحص يُبلّغ انحرافاً أبدياً لا سبب له |
+| **حذف الالتزام** | محرَّم بالقواعد (`allow delete: if false`) ويُفقد الأثر التاريخي (القاعدة 19.10) |
+| **بلا قيد (تحويل وصفي)** | حساب خصوم برصيد صفر مع `debt.principalMinor = 800` ⇒ **ميزان المراجعة يختلّ**، و«الديون عليّ» في لوحة التحكم (من `accounts`) **لا يرى المبلغ** |
+| **عكس الالتزام ثم إنشاء دين** | الالتزام **لا قيد له** أصلاً فلا شيء يُعكس؛ `voidTransaction` للقيود لا للمستندات |
+
+**نواقص مُعلَنة في هذا الجسر** (مجموعة في §17): `ObligationStatus` **لا تحتوي `converted`** فنستخدم
+`cancelled` + ملاحظة + `auditLogs`، وهذا يفقد التمييز في التقارير بين «ملغى» و«محوَّل»؛ ولا حقل ربط
+بنيوي (`convertedToDebtId` / `sourceObligationId`) فالربط عبر `refs.obligationId` على القيد ونصياً في
+`notes`؛ **ويجب تصحيح محدِّد لوحة التحكم** ليستثني `cancelled`.
+
+### 6.5 الاتجاه المعاكس: دين بأقساط — هل كل قسط التزام؟
+
+| الخيار | الحكم | السبب |
+|---|---|---|
+| **`debt.installments[]` داخل مستند الدين** | **✅ المعتمد للديون الشخصية** | مستند واحد، جدول مخزَّن صريح (§2.6 من العقد)، بلا 60 مستند التزام، والحالة مشتقة بدالة واحدة |
+| `obligations` لكل قسط بـ `nature:'financing'` | ✅ **للقرض المؤسسي فقط** (قسط سيارة/مصرف) | لأن المستخدم يريد لكل قسط موعداً وتنبيهاً وبنداً في «القادمة»، و`recurrences` تولّدها بمعرّف حتمي |
+| الاثنان لنفس الدين | ❌ **ممنوع** | ازدواج فوري في «إجمالي المستحق» (الدين + الأقساط) |
+
+**قاعدة صلبة M-I8:** الدين لا يكون له `installments[]` **و** التزامات تشير إليه في الوقت نفسه.
+**لكل مديونية مسار واحد، يُختار عند الإنشاء ولا يُغيَّر.**
+**البديل المرفوض:** حرية الاختيار لاحقاً ⇒ مستخدم يُنشئ الاثنين ويرى مبلغه مرتين بلا تفسير.
+
+---
+
+## 7. الاقتراض والإقراض — لماذا لا يتضخّم أي تقرير
+
+### 7.1 السيناريو المطلوب حرفياً: اقتراض 1000 د.ل نقداً من صديق
+
+**القيد الوحيد** (R6 حالة أ، `kind: 'borrow'`):
+
+```
+Dr  asset.cash.main              1,000,000 درهم      ← النقد يرتفع
+Cr  liability.payable.{ahmad}    1,000,000 درهم      ← الدين عليّ ينشأ
+                                 ─────────
+التوازن: 1,000,000 = 1,000,000 ✓     (I1 مفروض من الخادم)
+```
+
+| الكيان | الأثر | لماذا |
+|---|---|---|
+| `accounts.asset.cash.main` | `debitTotalMinor += X` ⇒ `balanceMinor += X` | المال في اليد فعلاً |
+| `accounts.liability.payable.{ahmad}` | `creditTotalMinor += X` ⇒ `balanceMinor += X` | خصم حقيقي. **يُنشأ الحساب تلقائياً عند أول دين لهذا الشخص** |
+| `debts/{id}` | `direction:'payable'`, `principalMinor: X`, `remainingMinor: X`, `createdCash: true` | سجل المديونية وموعدها وأقساطها |
+| **النقد المتاح** | **`+X`** | صحيح: أستطيع إنفاقه الآن |
+| **إجمالي الدخل** | **✗ صفر تغيير** | **لا حساب `income` في القيد** |
+| **صافي التدفق النقدي** | **✗ صفر تغيير** | `netCashFlowMinor === totalIncome − totalExpense ± تصحيحات` (I9)، ولا أحدهما تغيّر |
+| **صافي الثروة** | **✗ صفر تغيير** | أصل `+X` وخصم `+X` ⇒ `(A+X) − (L+X) = A − L`. **وهذا هو الجواب الدقيق: الاقتراض لا يُثريك** |
+| `periods.borrowedMinor` | `+X` | **حقل محيَّد للرقابة فقط** — لا يدخل أي معادلة دخل أو مصروف |
+| `budgetPeriods` | ✗ | لا مصروف ⇒ لا استهلاك ميزانية |
+
+**لماذا هذا مضمون ولا يعتمد على انتباه المبرمج؟** لأن التقرير **دالّة في نوع الحساب في السطر**:
+
+```ts
+// domain/rules/classify.ts — 〔تابع〕 العقد §9/R11
+export function classifyLineForReports(line: JournalLine): 'income' | 'expense' | 'neutral' {
+  if (line.accountType === 'income')  return 'income';
+  if (line.accountType === 'expense') return 'expense';
+  return 'neutral';                    // asset | liability | equity
+}
+```
+
+قيد الاقتراض **لا يحتوي أي سطر من نوع `income`** ⇒ أي استعلام، أي تقرير، أي تصدير، أي
+`sum(signedAmountMinor) where accountType=='income'` **لا يمكنه أن يراه**. وهذا **ليس شرطاً برمجياً
+قابلاً للنسيان، بل غياب بنيوي.** والقاعدة الهندسية المقابلة مفروضة بأداة البناء:
+**B10 — `entry.kind` يُحرَّم استخدامه في أي دالة تحسب رقماً.**
+
+### 7.2 الإقراض 500 د.ل — ليس مصروفاً
+
+```
+Dr  asset.receivable.{salem}    500,000      ← أصل غير سائل (isCashLike = false، مفروض بـ I22)
+Cr  asset.cash.main             500,000      ← النقد ينقص
+kind: 'lend'
+```
+
+| الكيان | الأثر |
+|---|---|
+| النقد المتاح | **`−X`** (ويُفحص `minBalanceMinor` كأي خروج نقد) |
+| «إجمالي المستحق لي» | `+X` — رقم **منفصل تماماً**، لا يُجمع مع النقد المتاح (R9) |
+| إجمالي المصروفات | **✗** — لا حساب `expense` في القيد |
+| صافي الثروة | **✗ صفر** — أصل سائل تحوّل إلى أصل غير سائل |
+| `periods.lentMinor` | `+X` (محيَّد) |
+| الميزانية | ✗ **لا تُستهلك** — وهذا خطأ شائع في التطبيقات المنافسة |
+
+**ومتى يصبح الإقراض مصروفاً؟** **فقط عند الشطب** (`debtWriteOff`):
+`Dr expense.baddebt / Cr asset.receivable.{c}` ⇒ **هنا** يُعترف بالخسارة، فيزيد المصروف وينقص صافي الثروة.
+
+### 7.3 جدول «ليس دخلاً / ليس مصروفاً» الكامل
+
+| العملية | النقد | الدخل | المصروف | صافي الثروة | صافي التدفق | الميزانية |
+|---|---|---|---|---|---|---|
+| اقتراض نقدي (`borrow` أ) | `+X` | ✗ | ✗ | **0** | ✗ | ✗ |
+| شراء بالأجل (`borrow` ب) | ✗ | ✗ | **`+X`** | `−X` | ✗ | **`+X`** |
+| دين افتتاحي (`opening`) | ✗ | ✗ | ✗ | `−X` | ✗ | ✗ |
+| سداد دين (`debtRepayment`) | `−X` | ✗ | ✗ | **0** | `−X` | ✗ |
+| سداد بفوائد `i` | `−(X+i)` | ✗ | **`+i` فقط** | `−i` | `−(X+i)` | `+i` على `expense.finance` |
+| إقراض (`lend`) | `−X` | ✗ | ✗ | **0** | ✗ | ✗ |
+| تحصيل (`debtCollection`) | `+X` | ✗ | ✗ | **0** | ✗ | ✗ |
+| شطب مستحق (`debtWriteOff`) | ✗ | ✗ | **`+X`** | `−X` | ✗ | `+X` إن للفئة سقف |
+| تحويل بلا عمولة | **0** | ✗ | ✗ | **0** | ✗ | ✗ |
+| تحويل بعمولة `f` | `−f` | ✗ | **`+f`** | `−f` | `−f` | `+f` |
+| دفع التزام `nature='expense'` | `−X` | ✗ | **`+X`** | `−X` | `−X` | **`+X`** |
+| **دفع التزام `nature='financing'`** | `−X` | ✗ | **✗** | **0** | `−X` | **✗** |
+| تخصيص لهدف (`earmark`) | **0** | ✗ | ✗ | **0** | ✗ | ✗ |
+| احتساب زكاة (`zakatAccrual`) | ✗ | ✗ | ✗ | **`−X`** | ✗ | ✗ |
+| تحويل التزام إلى دين 〔جديد〕 | **0** | ✗ | **`+X`** إن `expense` | `−X` إن `expense`، **0** إن `financing` | ✗ | `+X` إن `expense` |
+
+> **قراءة هذا الجدول شرط قبول أي مطوّر جديد في المشروع.** كل خانة «✗» و«0» فيه **نفي مُختبَر**
+> في مجموعة `T-PLAN` (اختبار جدولي لكل صف)، لا سلوك ضمني.
+
+### 7.4 ما يراه المستخدم — صدق العرض
+
+شاشة الاقتراض **لا تسمّي نفسها «دخل»**، وتعرض بعد التسجيل ثلاثة أسطر صريحة:
+
+> ✔ **ارتفع نقدك 1,000.000 د.ل**
+> ✔ **ونشأ دين عليك لـ «أحمد» بقيمة 1,000.000 د.ل**
+> ℹ **هذه العملية ليست دخلاً: صافي ثروتك لم يتغيّر، ولن تظهر في تقرير الدخل.**
+
+**البديل المرفوض:** تسجيل القرض «دخلاً» مع وسم استبعاد (`excludeFromIncome: true`).
+**سبب الرفض:** حقل الاستبعاد يجب أن يحترمه **كل** استعلام في النظام إلى الأبد؛ وأول استعلام طبيعي
+(`where type == 'income'`) **يضخّم الدخل بأصل كل قرض** — وهو عين ما تحرّمه القاعدة 19.11 (ع-ب-4).
+
+---
+
+## 8. صافي الثروة مقابل النقد المتاح
+
+### 8.1 المعادلات الدقيقة
+
+```ts
+// domain/selectors/wealth.ts — 〔تابع〕 العقد R9/§5.3، بمعادلات مكتملة
+
+/** 1) النقد المتاح = ما أستطيع إنفاقه اليوم. */
+export const availableCashMinor = (accs: Account[]): Minor =>
+  sumMinor(accs.filter(a => a.isCashLike && a.status === 'active' && a.isPostable)
+               .map(a => a.balanceMinor as Minor));
+// isCashLike = true لـ cash | bank | ewallet | other   ·   false لـ receivable (I22 من الخادم)
+
+/** 2) المتاح للإنفاق = النقد المتاح ناقص ما حُجز لأهداف. للعرض والتحذير لا للمنع. */
+export const spendableCashMinor = (accs: Account[]): Minor =>
+  sumMinor(accs.filter(a => a.isCashLike && a.status === 'active' && a.isPostable)
+               .map(a => (a.balanceMinor - a.earmarkedMinor) as Minor));
+
+/** 3) إجمالي المستحق لي — رقم **منفصل**، لا يُجمع مع (1) أبداً. */
+export const totalReceivablesMinor = (accs: Account[]): Minor =>
+  sumMinor(accs.filter(a => a.subtype === 'receivable' && a.status === 'active')
+               .map(a => a.balanceMinor as Minor));
+
+/** 4) إجمالي الديون عليّ (شخصية + تمويلية + زكاة مستحقة). */
+export const totalPayablesMinor = (accs: Account[]): Minor =>
+  sumMinor(accs.filter(a => a.type === 'liability' && !a.excludeFromNetWorth)
+               .map(a => a.balanceMinor as Minor));
+
+/** 5) صافي الثروة = كل الأصول − كل الخصوم. من الدفتر وحده. */
+export const netWorthMinor = (accs: Account[]): Minor => {
+  const live   = accs.filter(a => !a.excludeFromNetWorth && a.status === 'active');
+  const assets = sumMinor(live.filter(a => a.type === 'asset').map(a => a.balanceMinor as Minor));
+  const liabs  = sumMinor(live.filter(a => a.type === 'liability').map(a => a.balanceMinor as Minor));
+  return subMinor(assets, liabs);
+};
+```
+
+**بالكلمات:**
+
+```
+النقد المتاح     = Σ أرصدة الحسابات { isCashLike && active && isPostable }
+                   = النقد + الحسابات المصرفية + المحافظ الإلكترونية
+                   **لا يشمل** المستحق لي (R9، مفروض من الخادم بـ I22)
+                   **ولا يُطرح منه** المحجوز للأهداف (ذلك مؤشر منفصل)
+
+المتاح للإنفاق   = النقد المتاح − Σ earmarkedMinor
+
+صافي الثروة      = (النقد + المصارف + المحافظ + المستحق لي)
+                 − (الديون عليّ + الالتزامات التمويلية + الزكاة المستحقة المُقرّة)
+
+                 **لا يُطرح منه:** الالتزامات المستقبلية غير المستحقة،
+                                   ولا الالتزامات المتأخرة غير المحوَّلة إلى ديون،
+                                   ولا الأهداف المالية، ولا الحجوزات (earmarks).
+```
+
+### 8.2 الحسم المطلوب: هل تُطرح الالتزامات المستقبلية من صافي الثروة؟
+
+> ### القرار: **لا تُطرح. صافي الثروة رقم دفتري بحت.**
+
+**خمسة أسباب، كل منها كافٍ وحده:**
+
+| # | السبب | التفصيل |
+|---|---|---|
+| **1** | **بنيوي: لا قيد ⇒ لا رقم** | R4 حَسَم أن إنشاء الالتزام **لا يولّد قيداً**. وصافي الثروة يُحسب من `accounts` التي لا تتحرك إلا بالقيود. طرح الالتزامات يعني **قراءة مجموعة ثانية وخلطها برقم دفتري** ⇒ رقم لا يقابله قيد ولا يفحصه ثابت |
+| **2** | **المتطلبات تمنع الخلط** | §12 يطلب «فصل واضح بين البيانات الفعلية والتوقعات والافتراضات». الالتزام **توقّع**، ودمجه في «صافي الثروة» (أشهر رقم فعلي في التطبيق) **خلط صريح** |
+| **3** | **غير معرَّف رياضياً أين يتوقف** | إن طُرح إيجار نوفمبر، فلماذا لا إيجار 2027 كله؟ ولا الاشتراكات إلى الأبد؟ أي التزام متكرر بلا `endDate` يجعل صافي الثروة **سالباً بلا نهاية**. وكل حدٍّ زمني نختاره (30 يوماً؟ 90؟) **قرار عرض لا حقيقة محاسبية** |
+| **4** | **ازدواج مؤكَّد عند الدفع** | يوم الدفع ينقص النقد `−X` **وينقص الالتزام المتبقي** `−X` معاً. فلو كان كلاهما داخل الرقم ⇒ الرقم **لا يتغيّر بالدفع** (صحيح بالمصادفة)، **لكنه كان قبل الدفع أقل من الحقيقة** بمقدار التزام لم يُستحقّ بعد ⇒ رقم خاطئ معروض لأسابيع |
+| **5** | **تناقض مع الالتزام التمويلي** | قسط القرض التمويلي **مطروح فعلاً** لأن أصله دين في `liability.financing`. فطرح الالتزام التمويلي أيضاً = **طرح نفس المبلغ مرتين** ⇒ ازدواج صريح |
+
+**المقابل: مؤشر توقّع منفصل ومُوسوم — لا بديلاً عن صافي الثروة بل إلى جانبه:**
+
+```ts
+// 〔جديد〕 domain/selectors/forecast.ts — محدِّد قراءة فقط، صفر كتابات
+export interface ForecastWindow { days: 7 | 30 | 90; }
+
+/**
+ * «المتاح بعد التزامات {n} يوماً» — مؤشر **توقّع**.
+ * قاعدة عرض إلزامية: يُعرض بوسم مختلف وبعنوان يحتوي كلمة «توقّع»،
+ * و**يُحرَّم** تسميته «صافي الثروة» أو «رصيدك الحقيقي» في أي شاشة أو تصدير.
+ */
+export function projectedSpendableMinor(
+  accounts: readonly Account[],
+  obligations: readonly Obligation[],   // status ∈ {upcoming, due, overdue, partiallyPaid}
+  debts: readonly Debt[],               // direction='payable' و expectedSettleAt داخل النافذة
+  today: DateKey, w: ForecastWindow
+): {
+  spendableNowMinor: Minor;             // فعلي
+  dueWithinWindowMinor: Minor;          // توقّع: Σ remaining للالتزامات المستحقة في النافذة
+  debtDueWithinWindowMinor: Minor;      // توقّع
+  projectedMinor: Minor;                // spendableNow − dueWithin − debtDueWithin
+  assumptionsAr: string[];              // تُعرض حرفياً (المتطلبات §12)
+};
+```
+
+### 8.3 بطاقات لوحة التحكم — ستة أرقام منفصلة لا تُجمع
+
+| البطاقة | المعادلة | المصدر | قراءات | نصّ توضيحي **إلزامي** |
+|---|---|---|---|---|
+| **الأموال المتاحة** | `availableCashMinor` | لقطة `accounts` | 0 إضافية | «لا يشمل المبالغ المستحقة لك» |
+| **المتاح للإنفاق** | `spendableCashMinor` | نفسها | 0 | «بعد حجز {n} أهداف بقيمة {y} د.ل» |
+| **المستحق لي** | `totalReceivablesMinor` | نفسها | 0 | «ليس نقداً متاحاً حتى يُحصَّل» |
+| **الديون عليّ** | `totalPayablesMinor` | نفسها | 0 | «الأصل القائم، لا الالتزامات الشهرية» |
+| **صافي الثروة** | `netWorthMinor` | نفسها | 0 | «الأصول ناقص الخصوم. **لا يشمل الالتزامات القادمة**» |
+| **توقّع 30 يوماً** | `projectedSpendableMinor` | + `obligations` + `debts` | ≤20 | «**توقّع** مبني على مواعيد الاستحقاق المسجَّلة» |
+
+**قاعدة عرض صلبة:** يُحرَّم في أي شاشة أو تصدير عرض **رقم واحد** يجمع النقد مع المستحق لي أو يطرح
+منه الديون — إلا «صافي الثروة» بتعريفه أعلاه وبعنوانه هو.
+
+### 8.4 ثوابت تحقّق مشتقة
+
+| # | الثابت | الفائدة |
+|---|---|---|
+| **M-I9** | `netWorthMinor === Σ equity.balanceMinor + Σ income.balanceMinor − Σ expense.balanceMinor` على كل الشجرة | نتيجة مباشرة لميزان المراجعة (I4). **فحص مجاني** يكشف أي حساب أُنشئ بنوع خاطئ أو خارج التصنيف |
+| **M-I10** | `availableCashMinor ≤ Σ asset.balanceMinor`، والفرق `=` مجموع المستحقات بالضبط | يكشف خرق I22 (مستحق وُسم `isCashLike: true`) |
+| **M-I11** | `spendableCashMinor ≤ availableCashMinor`، والفرق `= Σ earmarkedMinor = Σ equity.earmark.*` (I20) | يربط الحجوزات بحقوق الملكية |
+
+---
+
+## 9. الأهداف المالية والادخار
+
+### 9.1 السؤال: المبلغ المدخر حساب فعلي أم تخصيص افتراضي؟
+
+العقد يوفّر الوضعين (`FinancialGoal.mode`) ولم يحسم الافتراضي ولا قاعدة الاختيار. **هذا هو الحسم:**
+
+> ### القرار
+> **الافتراضي `virtualEarmark` (تخصيص دفتري)** لأنه الحالة الواقعية الغالبة: المال **موجود الآن**
+> في حساب قائم، والمستخدم يريد حجز جزء منه.
+> **و`backedAccount` هو المُوصى به** متى وُجد حساب توفير حقيقي — والواجهة **تقترحه صراحةً** عند
+> إنشاء هدف إن وُجد حساب لا يُستخدم للإنفاق اليومي.
+
+| الوضع | ما يحدث فعلاً | التقدم | القيد | متى يُختار |
+|---|---|---|---|---|
+| **`backedAccount`** | **مال مُحوَّل فعلاً** إلى حساب توفير بعملية `transfer` عادية | **رصيد الحساب الداعم** مباشرة | **لا قيد خاص للهدف** — التحويل قيد عادي | يوجد حساب توفير/محفظة منفصلة فعلاً |
+| **`virtualEarmark`** | **لا نقل نقد**. قيد في حقوق الملكية: `Dr equity.unallocated / Cr equity.earmark.goal.{id}` + `account.earmarkedMinor` في نفس المعاملة | `goal.savedMinor` = رصيد `equity.earmark.goal.{id}` (I21) | `kind: 'earmark'` | حساب واحد يُستخدم لكل شيء |
+
+**لماذا التخصيص داخل حقوق الملكية وليس تحويلاً إلى حساب وهمي؟**
+
+| البديل المرفوض | سبب الرفض |
+|---|---|
+| حساب `asset` وهمي «ادخار» يُحوَّل إليه | **يكسر «الأموال المتاحة»**: إن كان `isCashLike: true` فالمال يُحسب متاحاً ولم يُحجز شيء؛ وإن كان `false` **فقد اختفى 500 د.ل من أهم بطاقة بينما هي في جيب المستخدم فعلاً** ⇒ رقم كاذب |
+| حقل `savedMinor` حرّ على الهدف بلا قيد | رقم خارج ضمان التوازن — **نفس العيب ع-ج-1** ⇒ لا ثابت يكشف خطأه ولا إعادة بناء تصلحه |
+| خصم المحجوز من الرصيد المعروض | «إجمالي الأموال المتاحة» يصير **أقل من مجموع الأرصدة الفعلية** ⇒ لا يطابق أي كشف حساب ⇒ المستخدم يفقد الثقة بالنظام كله |
+| **تخصيص في `equity` + مرآة `earmarkedMinor`** | **✅ المعتمد**: محاسبياً سليم (الأصول لا تتغيّر)، صادق مع المستخدم (المال في حسابه)، وقابل للفحص بثابتين (I20 و I21) |
+
+### 9.2 كيف نمنع صرفه دون قصد — أربع طبقات بلا كذب على المستخدم
+
+| # | الطبقة | السلوك | شدّتها |
+|---|---|---|---|
+| **1** | **عرض افتراضي** | كل شاشة إدخال مصروف/تحويل تعرض **«المتاح للإنفاق»** (`balance − earmarked`) **رقماً أساسياً**، والرصيد الكامل بخط أصغر تحته | تغيير إدراك |
+| **2** | **تحذير لحظي في الواجهة** | أثناء الكتابة: «سيتجاوز هذا المبلغ المتاح للإنفاق بـ {d} د.ل (محجوز لـ {goalName})» | تحذير |
+| **3** | **تحذير داخل المعاملة (ADR-017)** | `balance − X < earmarkedMinor` ولكن `≥ minBalanceMinor` ⇒ `warnings += EARMARK_EXCEEDED` **وتمضي العملية**: «رصيد الحساب يكفي، لكن المتاح للإنفاق {spendable} د.ل بعد حجز الأهداف. هل تمضي؟» | **تحذير لا منع — ملزم بالعقد** |
+| **4** | **المنع الصلب — موجود أصلاً** | `account.minBalanceMinor` | **منع فعلي من الخادم** |
+
+> ### الجواب الدقيق على «كيف نمنع صرفه دون قصد؟»
+> **الحجز مُصمَّم ليكون ناعماً، والمنع الصلب موجود بأداة أخرى قائمة.**
+> المال ملك المستخدم، وحجب إنفاقه على نفسه **سلوك أبوي** يدفعه إلى تحريف المبلغ أو التاريخ ليعبر
+> الحاجز — وهو ما يُفسد البيانات فعلاً. ومن أراد **قفلاً حقيقياً** فالنظام يوفّره بأداة مُفرضة من
+> الخادم: يرفع `minBalanceMinor` للحساب إلى قيمة المحجوز ⇒ **القاعدة ترفض الكتابة**
+> (`balanceMinor >= minBalanceMinor` في `firestore.rules`) ⇒ **منع على مستوى قاعدة البيانات لا الواجهة.**
+> والواجهة تقترحه صراحةً: «هل تريد قفل {y} د.ل في هذا الحساب؟ لن تتمكن من الإنفاق تحت هذا الحد.»
+> **ودمج الطبقتين 3 و4 في فحص واحد خطأ دلالي** (ADR-017): الأولى قرار مستخدم والثانية قيد نظام.
+
+**ما يبقى من خسارة مُعلَنة:** رفع `minBalanceMinor` يقفل الحساب **كله** عند حدٍّ واحد ولا يرتبط بهدف
+معيّن، فحجزان لهدفين يحتاجان جمعاً يدوياً. **والبديل** (قفل لكل هدف مفروض من الخادم) يستلزم قاعدة
+تربط رصيد حساب بمجموع حسابات حجز أخرى — **مستحيل في قواعد Firestore** (لا حلقات، ولا رؤية لمستندات
+أخرى في نفس المعاملة) ⇒ يحتاج Blaze (§18.4 من العقد).
+
+### 9.3 تحقيق الهدف، وصرفه، وعكسه
+
+| الحدث | الأثر |
+|---|---|
+| `savedMinor >= targetMinor` | `goal.status = 'achieved'` **في نفس المعاملة** (الحالة تعتمد على النتيجة ⇒ قراءة + قيمة مطلقة، جدول 5.4) + إشعار + حدث `GoalAchieved` |
+| **صرف المبلغ على الهدف فعلاً** (شراء السيارة) | **عمليتان منفصلتان:** (1) `releaseEarmark` 〔جديد〕 = قيد `Dr equity.earmark.goal.{id} / Cr equity.unallocated` يحرّر الحجز؛ (2) المصروف الحقيقي بفئته الحقيقية. **ممنوع** أن يكون «الصرف على هدف» مصروفاً بلا فئة، وإلا خرج من `expenseByCategory` كبُعد تجزيء |
+| عكس تخصيص | `goal.savedMinor −= X`، `account.earmarkedMinor −= X`، والحالة تعود `active` إن كانت `achieved` (جدول 8.3 من العقد) |
+| أرشفة/إلغاء هدف وله حجز | **ممنوع** قبل تحرير الحجز ⇒ `GOAL_HAS_EARMARK` 〔جديد〕، وإلا بقي رصيد في `equity.earmark.goal.{id}` بلا هدف ⇒ **خرق I20 و I21** |
+| هدف `backedAccount` والحساب الداعم يُنفق منه | `savedMinor` يهبط تلقائياً لأنه **رصيد الحساب نفسه** ⇒ تحذير «تراجع تقدّم الهدف» (حدث `GoalProgressRegressed` 〔جديد〕) |
+
+**〔جديد〕** `releaseEarmark` و`GOAL_HAS_EARMARK` غير موجودين في العقد
+(`OperationKind` يحتوي `earmarkToGoal` فقط) ⇒ §17.
+
+### 9.4 تغذية الهدف تلقائياً من الراتب؟
+
+| الخيار | الحكم | السبب |
+|---|---|---|
+| **اقتراح يدوي عند تسجيل الدخل** | **✅ المعتمد**: بعد `recordIncome` يعرض المُستجيب «هل تخصّص {y} د.ل لهدف {goal}؟» بزر واحد ⇒ المستخدم يقرّ ⇒ `earmarkToGoal` | يحقّق الراحة بلا قيد صامت، ويبقى كل قيد نتيجة قرار |
+| تخصيص تلقائي بقاعدة ثابتة | ❌ | قيد مالي يُنشأ بلا قرار المستخدم. ولو فشل (هدف مؤرشف، حساب مؤرشف) فشل صامت في عملية الدخل نفسها ⇒ يُربك أهم عملية |
+| `recurrences` بـ `kind: 'earmark'` | ⏸ مؤجَّل | ممكن تقنياً (نفس المعرّف الحتمي)، لكن `RecurrenceRule.kind` محصور في `'expense' \| 'income' \| 'obligation'` ⇒ يحتاج ADR ⇒ §17 |
+
+---
+
+## 10. الزكاة — الربط والفصل التام
+
+### 10.1 القاعدة الحاكمة
+
+> **الاحتساب معرفة، والدفع مال.** حاسبة الزكاة **لا تمسّ أي رصيد**، وسجل الزكاة **لا يخصم شيئاً**،
+> ولا يحدث أي خصم إلا بقيد صريح بقرار المستخدم.
+> (المتطلبات §15.4 نصّاً: «فصل احتساب الزكاة عن تسجيل دفعها ماليًا، فلا يُخصم مبلغ دون دفع فعلي».)
+
+### 10.2 ثلاث مراحل منفصلة تماماً
+
+```mermaid
+flowchart TD
+  subgraph M1["المرحلة 1 — الاحتساب: صفر أثر مالي"]
+    A1["لقطة الأرصدة من accounts"] --> A2["المستخدم يختار صراحةً:<br/>المستحقات المرجوّة · الديون الحالّة المطروحة<br/>النصاب nisabMinor ومصدره"]
+    A2 --> A3["zakatBaseMinor = نقدية + مستحقات مرجوّة − ديون حالّة"]
+    A3 --> A4{"zakatBaseMinor >= nisabMinor؟"}
+    A4 -->|"لا"| A5["لا زكاة — السجل بحالة belowNisab"]
+    A4 -->|"نعم"| A6["zakatDueMinor = mulRate(base, 250)<br/>BigInt · نصف-لأعلى · 2.5% = 250 bps"]
+    A6 --> A7["zakatRecords/{id} = calculated<br/>لا قيد · لا رصيد يتغيّر"]
+  end
+
+  A7 --> B0{"المرحلة 2 — هل يُقرّ المستخدم الاحتساب؟<br/>اختيارية"}
+  B0 -->|"يؤجّل"| B1["يبقى calculated — إرشادي بحت"]
+  B0 -->|"يُقرّ"| B2["accrueZakat: قيد zakatAccrual<br/>Dr equity.unallocated / Cr liability.zakat<br/>الخصوم ترتفع · صافي الثروة ينقص · النقد لا يتغيّر"]
+
+  B1 --> C0{"المرحلة 3 — الدفع الفعلي"}
+  B2 --> C0
+  C0 -->|"سجل مُقرّ accrued"| C1["payZakat: Dr liability.zakat / Cr asset.A<br/>النقد ينقص · الخصم يُطفأ · صافي الثروة لا يتغيّر"]
+  C0 -->|"سجل غير مُقرّ"| C2["payZakat: Dr expense.charity / Cr asset.A<br/>kind=expense · النقد ينقص · المصروف يرتفع"]
+  C1 --> D["zakatRecords: paidMinor += X · remainingMinor · status"]
+  C2 --> D
+```
+
+### 10.3 الوعاء: المعادلة ومصادرها
+
+```ts
+// 〔جديد〕 domain/zakat/base.ts — دوال نقية، صفر كتابات
+export interface ZakatBaseInput {
+  accounts: readonly Account[];
+  debts: readonly Debt[];
+  /** اختيار المستخدم لكل دين لي: مرجوّ يُضاف، ومشكوك يُستبعد. **لا استنتاج آلي.** */
+  includedReceivableDebtIds: readonly string[];
+  /** الديون الحالّة عليّ التي يُقرّ المستخدم بطرحها. */
+  deductedPayableDebtIds: readonly string[];
+}
+
+export interface ZakatBaseBreakdown {
+  cashLikeMinor: Minor;              // Σ أرصدة { isCashLike && active }
+  includedReceivablesMinor: Minor;   // Σ remainingMinor للمستحقات المختارة
+  deductedPayablesMinor: Minor;      // Σ remainingMinor للديون الحالّة المختارة
+  zakatBaseMinor: Minor;             // clampAtZero(cashLike + receivables − payables)
+  excluded: {
+    earmarkedMinor: Minor;             // **لا يُطرح** — مال مملوك
+    financingLiabilitiesMinor: Minor;  // التزامات تمويلية بعيدة — **لا تُطرح افتراضياً**
+    futureObligationsMinor: Minor;     // التزامات غير مستحقة — **لا تُطرح إطلاقاً**
+    writtenOffMinor: Minor;            // مشطوب — خرج من الملك
+  };
+  assumptionsAr: string[];           // تُعرض حرفياً للمستخدم
+}
+
+export function computeZakatBase(input: ZakatBaseInput): ZakatBaseBreakdown;
+
+/** 2.5% = 250 bps. يمرّ عبر mulRate (BigInt إلزامي — §2.4 من العقد). */
+export const ZAKAT_RATE_BPS = 250 as Bps;
+
+/** يُرجع 0 إن كان الوعاء أقل من النصاب. */
+export function computeZakatDue(baseMinor: Minor, nisabMinor: Minor): Minor;
+```
+
+| البند | يدخل الوعاء؟ | التبرير المعروض للمستخدم |
+|---|---|---|
+| النقد والمصارف والمحافظ (`isCashLike`) | **نعم** | مال نامٍ مملوك |
+| الديون لي **المرجوّة** | **نعم، باختيار صريح لكل دين** | «الدين المرجوّ مال لك». **لا استنتاج آلي** |
+| الديون لي **المشكوك فيها** | **لا، باختيار المستخدم** | لا يُزكّى ما لا يُرجى |
+| المشطوب (`writtenOffMinor`) | **لا** | خرج من الملك |
+| الديون عليّ **الحالّة** | **تُطرح، باختيار صريح** | «ديون حالّة تُنقص الوعاء» |
+| الديون عليّ **المؤجَّلة/الأقساط البعيدة** | **لا تُطرح افتراضياً** | مسألة مختلَف فيها ⇒ **قرار المستخدم مع إظهار الأثر رقمياً** |
+| الالتزامات المستقبلية (`obligations`) | **لا** | توقّعات لا مديونيات قائمة (R4) |
+| المحجوز للأهداف (`earmarkedMinor`) | **لا يُطرح** | تخصيص دفتري لا يُخرج المال من الملك |
+| الزكاة المستحقة من حول سابق (`liability.zakat`) | **تُطرح** | دين حالّ فعلاً |
+| النصاب `nisabMinor` | **مُدخَل مستخدم إلزامي** + مصدره وتاريخه | **لا سعر ذهب مُضمَّن في الكود ولا محمَّل من أي خدمة** — المتطلبات §25/٤ |
+
+**قاعدة صلبة:** `zakatBaseMinor` و`zakatDueMinor` **لقطة مخزَّنة** في `zakatRecords` لحظة الاحتساب،
+**ولا تُحدَّث تلقائياً** بتغيّر الأرصدة. السبب: الوعاء دالّة في **تاريخ الحول** لا في اللحظة الراهنة،
+وتحديثه تلقائياً يجعل الرقم يتغيّر بعد أن أقرّه المستخدم ⇒ مبلغ مُقرّ لا يطابق المدفوع.
+والواجهة تعرض: «احتُسب بتاريخ {d} — [أعد الاحتساب الآن]» ⇒ **سجل جديد**، لا تعديل القديم.
+
+### 10.4 مخطط البيانات
+
+```ts
+// 〔جديد〕 users/{uid}/zakatRecords/{zakatRecordId}
+export type ZakatRecordStatus =
+  | 'draft'          // قيد الإعداد
+  | 'belowNisab'     // الوعاء أقل من النصاب ⇒ لا زكاة
+  | 'calculated'     // محسوبة إرشادياً — **لا قيد ولا أثر مالي**
+  | 'accrued'        // أُقرّت ⇒ قيد zakatAccrual ⇒ خصم على liability.zakat
+  | 'partiallyPaid'
+  | 'paid'
+  | 'cancelled';
+
+export interface ZakatRecord {
+  id: string;
+  ownerUid: string; schemaVersion: number;
+
+  /** تاريخ الحول هجرياً ومقابله ميلادياً (المتطلبات §15.4 و§3). */
+  hawlDateHijri: string;              // هجري 'YYYY-MM-DD'
+  hawlDateGregorian: DateKey;
+  calculatedAt: DateKey;
+
+  // ── لقطة الوعاء: كل الأرقام مخزَّنة، لا محسوبة عند القراءة ──
+  cashLikeMinor: number;
+  includedReceivablesMinor: number;
+  deductedPayablesMinor: number;
+  zakatBaseMinor: number;
+
+  /** النصاب كما أدخله المستخدم + مصدره. لا قيمة افتراضية في الكود. */
+  nisabMinor: number;
+  nisabSourceAr: string;              // «سعر 85 غ ذهب لدى … بتاريخ …» — إلزامي غير فارغ
+  nisabBasis: 'gold85g' | 'silver595g' | 'custom';
+
+  rateBps: number;                    // 250 = 2.5%
+  zakatDueMinor: number;              // mulRate(zakatBaseMinor, rateBps)
+
+  /** لقطة المعرّفات المختارة — لتفسير الرقم بعد سنة. */
+  includedReceivableDebtIds: string[];
+  deductedPayableDebtIds: string[];
+  accountSnapshot: Array<{ accountId: string; code: string; balanceMinor: number }>;
+  assumptionsAr: string[];            // تُعرض حرفياً — «ليست فتوى»
+
+  status: ZakatRecordStatus;
+  /** قيد الاحتساب. null ما لم تُقرّ. */
+  accrualEntryId: string | null;
+  paidMinor: number;
+  remainingMinor: number;             // zakatDueMinor − paidMinor
+  paymentEntryIds: string[];          // ≤ 24 دفعة واقعياً ⇒ المصفوفة آمنة هنا
+  notes?: string;
+  createdAt: Timestamp; updatedAt: Timestamp;
+}
+```
+
+> **لماذا مصفوفة `paymentEntryIds` مقبولة هنا والعقد رفضها في الالتزامات (ADR-005)؟**
+> الرفض هناك كان لسقف واقعي حقيقي (60 قسطاً + نموّ مستند تقرؤه لوحة التحكم). الزكاة **حول واحد
+> في السنة** ودفعاته قليلة بطبعها، والمستند لا تقرؤه لوحة التحكم. ومع ذلك **السجل الرسمي للدفعات هو
+> الدفتر** (`journalEntries where refs.zakatRecordId == id`)، والمصفوفة **راحة عرض فقط**
+> ولا يُحسب منها أي رقم.
+
+### 10.5 الفصل التام — جدول الأثر
+
+| المرحلة | العملية | القيد | النقد | المصروف | الخصوم | صافي الثروة | `zakatRecords` |
+|---|---|---|---|---|---|---|---|
+| ① احتساب | — (شاشة فقط) | **✗ لا قيد** | ✗ | ✗ | ✗ | ✗ | `status: 'calculated'` |
+| ② إقرار (اختياري) | `accrueZakat` | `Dr equity.unallocated / Cr liability.zakat` | **✗** | **✗** | **`+X`** | **`−X`** | `status: 'accrued'` + `accrualEntryId` |
+| ③أ دفع سجل مُقرّ | `payZakat` | `Dr liability.zakat / Cr asset.{A}` | `−X` | **✗** | `−X` | **✗ صفر** | `paidMinor += X` |
+| ③ب دفع مباشر بلا إقرار | `payZakat` | `Dr expense.charity / Cr asset.{A}` (`kind:'expense'`) | `−X` | **`+X`** | ✗ | `−X` | `paidMinor += X` |
+
+**لماذا الإقرار (②) اختياري ومفيد؟** لأنه يحوّل الزكاة من رقم في شاشة إلى **خصم حقيقي في صافي الثروة**،
+فيراها المستخدم في لوحة التحكم ضمن «الديون عليّ» حتى يدفعها. ومن لا يريد ذلك يدفع بالمسار ③ب.
+
+**والمسارَان متعارضان ولا يُجمعان أبداً:** سجل أُقرّ **يجب** أن يُدفع بـ ③أ، وإلا بقي الخصم قائماً
+**وسُجِّل المصروف أيضاً** ⇒ خطأ مزدوج (خصم لا يُطفأ + مصروف لا مقابل له). يُفرض بثوابت:
+
+| # | الثابت | الفرض |
+|---|---|---|
+| **M-I12** | `status == 'accrued'` ⇒ كل دفعاته قيود `Dr liability.zakat`؛ و`status == 'calculated'` ⇒ كل دفعاته `Dr expense.charity`. **لا خلط في سجل واحد** | طبقة النطاق + `T-ZAKAT-3` |
+| **M-I13** | `Σ zakatRecords[status ∈ {accrued, partiallyPaid}].remainingMinor === balanceMinor` لحساب `liability.zakat` | الفاحص — قراءة واحدة |
+| **M-I14** | `remainingMinor === zakatDueMinor − paidMinor` و`0 ≤ paidMinor ≤ zakatDueMinor` | قاعدة أمان مقترحة على `zakatRecords` 〔جديد〕 |
+
+**تعارض مُعلَن في العقد (§17/٤):** جدول R11 يصنّف «دفع زكاة ⇒ `expense.charity` ⇒ مصروف»، وهو صحيح
+للمسار ③ب **فقط**؛ وتطبيقه على سجل مُقرّ يترك `liability.zakat` **لا يُطفأ أبداً**. كما أن
+`EntryKind` **لا تحتوي نوعاً لدفع الزكاة**، فالمسار ③أ يحتاج إمّا استخدام `debtRepayment`
+(شكله مطابق تماماً لقائمة `ALLOWED`: `liability` مدين + `asset` دائن) أو إضافة `zakatPayment` بـ ADR.
+
+### 10.6 حدود صريحة تُعرض للمستخدم
+
+1. **«حاسبة إرشادية لا فتوى»** — نصّ ثابت أعلى الشاشة (المتطلبات §15.4).
+2. **كل افتراض يُعرض حرفياً**: الطريقة، النصاب ومصدره، ما أُدخل وما استُبعد ولماذا.
+3. **لا سعر ذهب أو فضة مُضمَّن أو محمَّل من أي خدمة** — مُدخَل مستخدم بمصدره وتاريخه.
+4. **الحول مسؤولية المستخدم**: النظام يذكّر فقط، بمعرّف حتمي `rem:hawl:{hijriYear}`.
+5. **الصدقة التطوعية ليست زكاة**: `expense.charity` تستقبل الاثنين، والتمييز بوسم
+   `tags ∋ 'zakat'` على القيد ⇒ تقرير «الزكاة المدفوعة» يُصفّى بالوسم (مجموع فرعي، §2).
+
+---
+
+## 11. المهام والتذكيرات والتنبيهات — ثلاثة أشياء مختلفة
+
+### 11.1 الفرق في جدول واحد
+
+| | **المهمة** `tasks` | **التذكير** `reminders` | **التنبيه** `notifications` |
+|---|---|---|---|
+| **ما هو؟** | **عمل** على المستخدم أن يُنجزه | **قاعدة توقيت**: «نبّهني في T» | **أثر**: رسالة في صندوق الوارد |
+| **له حالة إنجاز؟** | **نعم** — `open/done` | **لا** — له `active/paused` فقط | **لا** — له `read/unread` |
+| **من يُغلقه؟** | **المستخدم بإجراء صريح** (المتطلبات §14) | لا يُغلق؛ يُطفأ أو ينتهي | يُقرأ أو يُحذف |
+| **يُنشئ غيره؟** | قد يُنشئ تنبيهاً عند التأخر | **يُنشئ تنبيهاً عند الإطلاق** | **لا يُنشئ شيئاً — نهاية السلسلة** |
+| **يُحذف؟** | لا — إلغاء/أرشفة | لا — إيقاف | **نعم** (ليس سجلاً محاسبياً) |
+| **مثال** | «راجع فاتورة الكهرباء» | «نبّهني قبل الاستحقاق 3 أيام، وفي يومه، وبعد 2» | «إيجار المنزل يستحق بعد 3 أيام» |
+| **في لوحة التحكم** | «مهام اليوم» | **لا يظهر** (محرّك خفي) | «التنبيهات المهمة» + العدّاد |
+
+> ### السلسلة السببية الوحيدة المسموحة
+> **سبب (كيان أو تاريخ) ← قاعدة (`reminders`) ← أثر (`notifications`) ← [اختيارياً] عمل (`tasks`)**
+> ولا يُسمح بأي اتجاه آخر: **التنبيه لا يُنشئ تنبيهاً**، والمهمة لا تُنشئ مهمة، والتذكير لا يُنشئ تذكيراً.
+> **ولا أحد منهم يكتب رقماً مالياً، إطلاقاً.**
+
+```mermaid
+flowchart LR
+  subgraph SRC["المصادر — كلها كيانات قائمة"]
+    S1["obligations<br/>dueDate"]
+    S2["debts<br/>expectedSettleAt"]
+    S3["financialGoals<br/>targetDate"]
+    S4["zakatRecords<br/>hawlDate"]
+    S5["tasks<br/>dueDate"]
+    S6["budgetPeriods / periods<br/>عتبة الاستهلاك"]
+    S7["worship<br/>تذكيرات اختيارية"]
+  end
+
+  SRC --> R["reminders — قواعد توقيت<br/>offsetDays · لا تُنفَّذ إلا عند فتح التطبيق (ق-1)"]
+  R --> RUN["مُشغِّل الاستدراك عند فتح التطبيق<br/>يحسب المستحق ويولّد بمعرّف حتمي"]
+  RUN --> N["notifications/{notif:kind:entityId:key}<br/>معرّف حتمي ⇒ استحالة التكرار"]
+  N --> UI["مركز التنبيهات + العدّاد + رابط الكيان"]
+
+  RUN -. "فقط إن settings.tasks.autoFromObligations = true" .-> T["tasks/{task:obl:obligationId}<br/>معرّف حتمي ⇒ مهمة واحدة لكل دورة"]
+  T --> N2["تنبيه «مهمة متأخرة» عند تجاوز dueDate"]
+  N2 --> UI
+
+  PAY["payObligation ⇒ status=paid"] -. "يُغلق المهمة المرتبطة<br/>completedBy=systemFromLinkedEntity" .-> T
+  PAY -. "يُلغي التنبيهات المعلّقة لهذا الكيان" .-> N
+```
+
+### 11.2 المخططات
+
+```ts
+// 〔جديد〕 users/{uid}/tasks/{taskId}
+export type TaskStatus = 'open' | 'inProgress' | 'done' | 'cancelled';
+export type TaskSource = 'user' | 'obligation' | 'debt' | 'goal' | 'zakat' | 'integrity';
+
+export interface Task {
+  id: string;                       // user:{uuid} أو **حتمي**: task:obl:{obligationId}
+  ownerUid: string; schemaVersion: number;
+  title: string;                    // عربي، غير فارغ
+  notes?: string;
+  listId?: string;                  // taskLists/{id}
+  priority: 1 | 2 | 3;
+  status: TaskStatus;
+  dueDate?: DateKey;
+  dueTime?: string;                 // 'HH:mm' محلي
+  /** التكرار للمهام الدورية — نفس محرّك recurrences بمعرّف حتمي. */
+  recurrenceId?: string;
+  occurrenceKey?: DateKey;
+
+  // ── المصدر والربط ──
+  source: TaskSource;               // 'user' للمهام اليدوية
+  linkedObligationId?: string;
+  linkedDebtId?: string;
+  linkedGoalId?: string;
+  linkedNoteId?: string;
+  linkedZakatRecordId?: string;
+
+  // ── الإنجاز ──
+  completedAt?: Timestamp;
+  /**
+   * **التمييز الذي يحفظ المتطلبات §14** («لا تُعرض مهمة كمكتملة دون إجراء إكمال صريح»):
+   *   'user'                     : ضغط المستخدم «تم».
+   *   'systemFromLinkedEntity'   : أُغلقت لأن المستخدم **نفّذ العمل مالياً** (دفع الالتزام)
+   *                                 — وهو **إجراء صريح** من المستخدم، لا تخمين من النظام.
+   */
+  completedBy?: 'user' | 'systemFromLinkedEntity';
+  completionNote?: string;
+  createdAt: Timestamp; updatedAt: Timestamp;
+}
+
+// 〔جديد〕 users/{uid}/reminders/{reminderId}
+export type ReminderTargetKind =
+  | 'obligation' | 'debtPayable' | 'debtReceivable' | 'task'
+  | 'goal' | 'zakatHawl' | 'budgetThreshold' | 'worship' | 'backupExport' | 'standalone';
+
+export interface Reminder {
+  id: string;                       // حتمي حيث أمكن: rem:obl:{obligationId}
+  ownerUid: string; schemaVersion: number;
+  targetKind: ReminderTargetKind;
+  targetId?: string;                // معرّف الكيان (فارغ في standalone)
+  /**
+   * الإزاحات بالأيام عن تاريخ الكيان: سالب = قبل، 0 = في اليوم، موجب = بعد.
+   * افتراضي الالتزامات [-3, 0, +2] ⇒ يغطّي «قبل الاستحقاق وفي يومه وبعد التأخر» (المتطلبات §8).
+   */
+  offsetDays: number[];
+  timeOfDay?: string;               // 'HH:mm'
+  /** لتذكير مستقل متكرر (ورد يومي، تصدير نسخة شهرياً). */
+  frequency?: Frequency;
+  interval?: number;
+  startDate?: DateKey; endDate?: DateKey;
+  /** آخر مفتاح إطلاق — **للعرض والتشخيص فقط**؛ الحارس الحقيقي معرّف الإشعار الحتمي. */
+  lastFiredKey: string | null;
+  channels: Array<'inApp' | 'webNotification'>;   // لا FCM (ق-1)
+  status: 'active' | 'paused';
+  createdAt: Timestamp; updatedAt: Timestamp;
+}
+
+// 〔تابع، بمخطط مكتمل〕 users/{uid}/notifications/{notificationId}
+export type NotificationKind =
+  | 'obligationUpcoming' | 'obligationDue' | 'obligationOverdue' | 'obligationPaid'
+  | 'debtDue' | 'debtCollectionDue' | 'debtSettled'
+  | 'budgetThreshold' | 'budgetExceeded' | 'householdBudgetThreshold'
+  | 'goalNearTarget' | 'goalAchieved' | 'goalProgressRegressed'
+  | 'taskOverdue' | 'taskDueToday'
+  | 'zakatHawlDue' | 'zakatAccrued'
+  | 'integrityDrift' | 'trialBalanceBroken' | 'rebuildFinished'
+  | 'pendingCommandRejected' | 'backupReminder' | 'worshipReminder';
+
+export interface AppNotification {
+  id: string;                       // **حتمي**: notif:{kind}:{entityId}:{key}
+  ownerUid: string; schemaVersion: number;
+  kind: NotificationKind;
+  severity: 'info' | 'warning' | 'critical';
+  titleAr: string; bodyAr: string;
+  /** الوجهة عند الضغط — «رابط للسجل المرتبط» (المتطلبات §17). */
+  link: { collection: string; docId: string; screen: string };
+  read: boolean; readAt: Timestamp | null;
+  /** مفتاح تجميع: إشعارات نفس الكيان تُستبدل لا تتكدّس. */
+  dedupeKey: string;
+  createdAt: Timestamp;
+}
+```
+
+### 11.3 متى يولّد النظام مهمة تلقائياً من التزام؟
+
+> ### القرار: **افتراضياً لا يولّد شيئاً.** التوليد مفتاح في الإعدادات، افتراضه **مُطفأ**.
+
+```ts
+// settings/app
+tasks: {
+  /** افتراضي false — سبب القرار في الجدول أدناه. */
+  autoFromObligations: boolean;
+  /** متى تُنشأ المهمة: عند بلوغ due أو overdue فقط، لا عند الإنشاء. */
+  autoTaskTrigger: 'onDue' | 'onOverdue';
+  /** حصر التوليد بالأولوية العالية لتقليل الضجيج. */
+  autoTaskMinPriority: 1 | 2 | 3;   // افتراضي 1
+}
+```
+
+| البديل | الحكم | السبب |
+|---|---|---|
+| **مُطفأ افتراضياً + مفتاح + حصر بالأولوية** | **✅ المعتمد** | شاشة الالتزامات **هي** قائمة العمل أصلاً، ومعها تنبيهات قبل/في/بعد. فتوليد مهمة لكل التزام يُنشئ **صندوقَي وارد لنفس الشيء** ⇒ المستخدم يُغلق أحدهما فيظنّ الآخر متأخراً |
+| مهمة لكل التزام تلقائياً | ❌ | 12 التزاماً شهرياً = **144 مهمة في السنة** تُزاحم مهام المستخدم الحقيقية في «مهام اليوم» |
+| مهمة عند الإنشاء | ❌ | التزام يُنشأ في يناير بموعد ديسمبر ⇒ مهمة معلّقة 11 شهراً |
+| مهمة بلا معرّف حتمي | ❌ | فتح التطبيق 5 مرات = **5 مهام متطابقة**. (نفس منطق ADR-004) |
+
+**الشرط الحتمي الذي يمنع التكاثر نهائياً:**
+
+```
+taskId = `task:obl:${obligationId}`
+```
+
+ولأن كل دورة التزام مستند مستقل بمعرّف حتمي `obl:{recurrenceId}:{dueDate}` (ADR-013)، فإن:
+
+- مهمة واحدة لكل **دورة**، إلى الأبد، مهما تعدّدت الأجهزة أو مرات فتح التطبيق.
+- **لا حاجة إلى قفل ولا إلى `lastRunAt` موثوق** — المفتاح هو الحارس.
+- إنشاء المهمة بـ `create` لا `set` ⇒ المحاولة الثانية تفشل بـ `already-exists` **وتُتجاهل بصمت**
+  (ليست خطأً، كما `alreadyApplied` في العقد §12.9).
+- وإن **ألغى** المستخدم المهمة فلن تُعاد خلقها، لأن المستند موجود بحالة `cancelled` ⇒ `create` يفشل.
+  **وهذا سلوك مقصود:** احترام قرار المستخدم بإخفائها.
+
+**إغلاق المهمة عند الدفع:**
+
+| الحالة | الإجراء | التبرير |
+|---|---|---|
+| `obligation.status → 'paid'` | المهمة المرتبطة ⇒ `status:'done'`, `completedBy:'systemFromLinkedEntity'`, `completionNote:'سُدِّد بالكامل'` | **لا يخرق المتطلبات §14**: الإكمال جاء من **إجراء صريح للمستخدم** (دفع المال)، لا من تخمين النظام. والعرض يذكر السبب حرفياً |
+| `partiallyPaid` | **المهمة تبقى مفتوحة** + تحديث العنوان «المتبقي {y} د.ل» | العمل لم يكتمل |
+| عكس الدفعة | المهمة تعود `open` وتُمحى `completedAt`/`completedBy` | انعكاس كامل للأثر، كأي مُجمَّع |
+| إلغاء الالتزام / تحويله إلى دين | المهمة ⇒ `cancelled` مع ملاحظة السبب | لا عمل متبقٍّ على هذا الكيان |
+
+### 11.4 منع التنبيهات المكرّرة — ثلاث آليات مختلفة لثلاث حالات
+
+| الحالة | الآلية | لماذا هذه وليست غيرها |
+|---|---|---|
+| **تنبيه عتبة الميزانية** | `budgetPeriods.categories[cat].alertFiredAtPercent` **يُقرأ ويُكتب داخل المعاملة** | القرار يعتمد على نتيجة الزيادة ⇒ لا بدّ من القراءة داخل المعاملة (جدول 5.4 من العقد). وهذه الحالة **الوحيدة** التي يُولَّد فيها تنبيه داخل معاملة مالية |
+| **تنبيهات التواريخ** (استحقاق، تأخر، حول، مهمة) | **معرّف إشعار حتمي**: `notif:obligationDue:{obligationId}:{2026-10-05}` | لا معاملة ولا قراءة ولا قفل. التشغيل 50 مرة ⇒ مستند واحد. **أرخص آلية في النظام** |
+| **تنبيهات مشتقة من مُجمَّع** (ميزانية المنزل، قرب الهدف) | معرّف حتمي بالعتبة: `notif:hhBudget:{pk}:{80}` | لا تُقرأ في المعاملة أصلاً؛ والعتبة جزء من المفتاح ⇒ تنبيه واحد لكل عتبة لا أكثر |
+
+**قاعدة إلزامية:** `AppNotification.id` **حتمي دائماً ولا يُستخدم `autoId` أبداً**.
+والصيغة: `notif:{kind}:{entityId}:{key}` حيث `key` = التاريخ أو العتبة أو مفتاح الدورة.
+
+> **انحراف مقصود عن العقد:** §12.1 و§12.4 من العقد تكتبان `notifications/{autoId}`.
+> **التوصية هنا: معرّف حتمي** حتى في تنبيهات المعاملة، فيصير منع التكرار **بنيوياً** بدل أن يعتمد على
+> `alertFiredAtPercent` وحده (الذي يحميه فعلاً، لكن طبقتين أفضل من واحدة بتكلفة صفر). ⇒ §17.
+
+### 11.5 ما لا يفعله أي منهم — نفي مقصود
+
+| ممنوع | السبب |
+|---|---|
+| تنبيه يُنشئ قيداً أو يغيّر رصيداً | التنبيه **أثر** لا سبب. وكل كتابة مالية تمرّ بـ `postOperation` بقرار مستخدم |
+| تذكير «يدفع» التزاماً تلقائياً | دفع بلا قرار = **خرق مباشر** للمتطلبات §25/٦ و§19 |
+| مهمة تُكمل نفسها بمرور الوقت | المتطلبات §14 نصّاً |
+| تنبيه يُحسب رقماً | كل رقم من محدِّد في طبقة النطاق (§5.3 من العقد) |
+| تذكير يعمل والتطبيق مغلق | **ق-1**: لا FCM على Spark. **لا نَعِد المستخدم بما لا نملكه** |
+
+---
+
+## 12. الأحداث الداخلية (domain events)
+
+### 12.1 القرار المعماري: مستويان، ولا ناقل أحداث
+
+> **لا يوجد في الطبقة المالية ناقل أحداث زمن تشغيل (event bus / pub-sub).**
+
+| المستوى | ما هو | يكتب ماذا؟ | الذرّية | المحرِّك |
+|---|---|---|---|---|
+| **المستوى 1 — أثر داخل المعاملة** | ليس حدثاً بالمعنى التقني، بل **كتابات حتمية** في `WritePlan` يبنيها `planOperation` | القيد، `postings`، الأرصدة، المُجمَّعات، الكيانات المرافقة، تنبيه الميزانية | **ذرّي 100%** | `postOperation` |
+| **المستوى 2 — مُستجيب بعد الـ commit** | ردّ فعل على `PostResult` أو على حالة عند فتح التطبيق | **`tasks`, `reminders`, `notifications` فقط — ولا رقم مالي إطلاقاً** | **غير ذرّي، ومتكرّر بأمان بمعرّف حتمي** | `reactors/*` + مُشغِّل الاستدراك |
+
+| البديل المرفوض | سبب الرفض |
+|---|---|
+| **ناقل أحداث داخل المعاملة** | المعاملة تُعاد ~5 مرات؛ ومُستجيب يُطلق أثراً جانبياً داخلها = **سلوك غير محدَّد** (نفس سبب منع `Date.now()` في `decide` — §7.2 من العقد) |
+| **ناقل أحداث بعد الـ commit يكتب أرقاماً مالية** | يخرق «نقطة الكتابة المالية الوحيدة»، ويفتح **مسار كتابة ثانياً** = الصف 1 في جرد الانحراف (أعلى احتمال) |
+| **سجل أحداث مخزَّن (event collection)** | رُفض في العقد (ADR-002 والبديل ع-ج): الدفتر **هو** السجل. ومجموعة أحداث ثانية = مصدر حقيقة ثانٍ ينحرف |
+| **لا أحداث إطلاقاً (كل شيء في المعاملة)** | يُجبر معاملة مالية على كتابة `tasks` و`reminders` ⇒ معاملة أكبر، وفشل في وحدة غير مالية **يُسقط عملية مالية صحيحة** |
+
+```ts
+// 〔جديد〕 domain/events/catalog.ts — عقد توثيقي وتنفيذي للمستوى 2
+export type DomainEventName =
+  | 'ExpenseRecorded' | 'IncomeReceived' | 'Transferred'
+  | 'ObligationCreated' | 'ObligationOccurrenceMaterialized'
+  | 'ObligationPaid' | 'ObligationFullyPaid' | 'ObligationBecameOverdue'
+  | 'ObligationCancelled' | 'ObligationConvertedToDebt'
+  | 'ObligationExtraChargesAdded'
+  | 'DebtCreated' | 'DebtRepaid' | 'DebtCollected' | 'DebtFullySettled'
+  | 'DebtWrittenOff' | 'DebtCancelled'
+  | 'EarmarkAdded' | 'EarmarkReleased' | 'GoalAchieved' | 'GoalProgressRegressed'
+  | 'BudgetThresholdCrossed' | 'BudgetExceeded' | 'HouseholdBudgetThresholdCrossed'
+  | 'EntryReversed' | 'EntryAmended' | 'DescriptiveEditApplied'
+  | 'OpeningBalanceSet' | 'AccountAdjusted' | 'AccountArchived' | 'MinBalanceChanged'
+  | 'PeriodLocked'
+  | 'ZakatCalculated' | 'ZakatAccrued' | 'ZakatPaid' | 'HawlDue'
+  | 'TaskCompleted' | 'TaskBecameOverdue' | 'ReminderFired'
+  | 'RecurrenceCaughtUp' | 'RecurrenceEnded' | 'MissedOccurrencesDetected'
+  | 'IntegrityDriftDetected' | 'TrialBalanceBroken'
+  | 'RebuildStarted' | 'RebuildFinished'
+  | 'PendingCommandQueued' | 'PendingCommandApplied' | 'PendingCommandRejected'
+  | 'DataExported' | 'SchemaMigrationApplied';
+
+export interface DomainEvent<N extends DomainEventName = DomainEventName> {
+  name: N;
+  /** مفتاح التكرار الآمن — يصير جزءاً من معرّف كل مستند يُنشئه المُستجيب. */
+  idempotencyKey: string;
+  occurredAt: string;              // ISO من الجهاز (للتشخيص لا للترتيب)
+  opId?: string;                   // العملية المالية التي أنتجته، إن وُجدت
+  entityRef: { collection: string; docId: string };
+  payload: Record<string, string | number | boolean | null>;
+}
+
+/** المستجيب: نقي فيما يقرّر، ويُرجع كتابات **غير مالية** فقط. */
+export interface Reactor<N extends DomainEventName> {
+  name: string;
+  on: N;
+  /** **يُحرَّم** إرجاع أي كتابة على: journalEntries, postings, accounts, periods,
+   *  accountPeriods, budgetPeriods, obligations, debts, financialGoals.
+   *  يُفرض بقاعدة ESLint مقترحة **B12**. */
+  react(e: DomainEvent<N>, ctx: ReactorContext): Promise<NonFinancialWrite[]>;
+}
+```
+
+### 12.2 الكتالوج الكامل
+
+**العمودان الأهم:** «أثر المستوى 1» = ما كُتب **في نفس المعاملة** ذرّياً؛
+«مُستجيبات المستوى 2» = ما يحدث **بعد** النجاح، ولا يكتب رقماً مالياً.
+
+| الحدث | المُطلِق | أثر المستوى 1 (داخل المعاملة) | مُستجيبات المستوى 2 | مفتاح التكرار الآمن |
+|---|---|---|---|---|
+| `ExpenseRecorded` | `recordExpense` | القيد + `postings` + حسابان + `accountPeriods×2` + `periods` + `budgetPeriods`(شرطي) | تنبيه ميزانية المنزل؛ تحذير «قرب تجاوز المتاح للإنفاق» | `opId` |
+| `IncomeReceived` | `recordIncome` | القيد + حسابان + `periods` + `incomeSchedules.occurrences[key]` | اقتراح تخصيص لهدف (زر واحد)؛ إلغاء تنبيه «دخل متوقع متأخر» | `opId` |
+| `Transferred` | `transfer` | حسابان أو ثلاثة + `transferVolumeMinor` (+عمولة) | — | `opId` |
+| `ObligationCreated` | `createObligation` | **مستند `obligations` فقط — لا قيد (R4)** | إنشاء `reminders/rem:obl:{id}` بـ `offsetDays` الافتراضي | `obligationId` |
+| `ObligationOccurrenceMaterialized` | مُشغِّل الاستدراك (ADR-013) | مستند دورة جديد بمعرّف `obl:{recurrenceId}:{dueDate}` | تذكير الدورة؛ ومهمة **إن فُعِّل المفتاح** | `obl:{recurrenceId}:{dueDate}` |
+| `ObligationPaid` | `payObligation` | القيد + حسابان + `obligationPaidMinor` (+مصروف/تمويل) + الالتزام + الميزانية(شرطي) | تحديث عنوان المهمة بالمتبقي؛ إلغاء تنبيه الاستحقاق | `opId` |
+| `ObligationFullyPaid` | `payObligation` حين `remaining == 0` | `status: 'paid'` | **إغلاق المهمة** (`systemFromLinkedEntity`)؛ إشعار «سُدِّد بالكامل»؛ إيقاف تذكيرات هذه الدورة | `obligationId` |
+| `ObligationBecameOverdue` | مهمة تحديث الحالات اليومية | `status: 'overdue'` (`writeBatch`) | تنبيه تأخر؛ مهمة إن فُعِّل المفتاح وبلغت الأولوية | `{obligationId}:{today}` |
+| `ObligationConvertedToDebt` 〔جديد〕 | `convertObligationToDebt` | قيد R6(ب) + `debts` جديد + `obligations.status='cancelled'` + `auditLogs` | إلغاء تذكيرات الالتزام؛ إنشاء تذكيرات الدين؛ إلغاء مهمته | `oblconv:{obligationId}` |
+| `DebtCreated` | `createDebt` | قيد (أ/ب/ج) + حساب الخصم/المستحق + `debts` + `borrowedMinor`/`lentMinor` | تذكير `expectedSettleAt`؛ ربط جهة الاتصال | `opId` |
+| `DebtRepaid` / `DebtCollected` | `payDebt` / `collectDebt` | القيد + حسابان + `repaidMinor`/`collectedMinor` + الدين | إشعار؛ تحديث التذكير | `opId` |
+| `DebtFullySettled` | حين `remaining == 0` | `status: 'settled'` | إشعار؛ إيقاف التذكيرات؛ إغلاق مهمة المتابعة | `debtId` |
+| `DebtWrittenOff` | `writeOffDebt` | قيد `Dr expense.baddebt` + `writtenOffMinor` + `auditLogs` | إشعار؛ **تنبيه أثر الزكاة**: «المشطوب لم يُحسب في وعاء الزكاة» | `opId` |
+| `EarmarkAdded` / `EarmarkReleased` | `earmarkToGoal` / `releaseEarmark`〔جديد〕 | قيد `equity` + `goal.savedMinor` + `account.earmarkedMinor` | إشعار تقدّم الهدف | `opId` |
+| `GoalAchieved` | `earmarkToGoal` حين `saved >= target` | `goal.status: 'achieved'` | إشعار تهنئة؛ اقتراح هدف تالٍ | `goalId` |
+| `GoalProgressRegressed` 〔جديد〕 | مُستجيب يرصد هبوط رصيد حساب داعم | — (لا كتابة مالية) | تنبيه «تراجع تقدّم الهدف» | `{goalId}:{pk}` |
+| `BudgetThresholdCrossed` | `recordExpense` / `payObligation` | `alertFiredAtPercent` **داخل المعاملة** + تنبيه | — (أُنجز في المستوى 1) | `{pk}:{categoryId}:{pct}` |
+| `HouseholdBudgetThresholdCrossed` 〔جديد〕 | مُستجيب يقرأ `periods.householdExpenseMinor` | — | تنبيه بمعرّف `notif:hhBudget:{pk}:{pct}` + `householdBudgets.alertFiredAtPercent` | `{pk}:{pct}` |
+| `EntryReversed` / `EntryAmended` | `voidTransaction` / `editTransaction` | عكس + بديل + قفل `entryCorrections` + دلتا صافية لكل المُجمَّعات + `auditLogs` | إعادة فتح المهمة المرتبطة؛ تنبيه «تم تصحيح عملية» | `rev:{entryId}` / `amd:{entryId}` |
+| `PeriodLocked` | شاشة الإعدادات | `periodLocks/{pk}` (نهائي) | تنبيه؛ إخفاء أزرار الإدخال لتلك الفترة | `pk` |
+| `ZakatCalculated` | شاشة الزكاة | `zakatRecords` فقط — **لا قيد** | — | `zakatRecordId` |
+| `ZakatAccrued` | `accrueZakat` | قيد `zakatAccrual` + `liability.zakat` + `status:'accrued'` | تنبيه «زكاة مستحقة {X} د.ل»؛ مهمة «ادفع الزكاة» (مصدرها `zakat`) | `opId` |
+| `ZakatPaid` | `payZakat` | القيد (③أ أو ③ب) + `paidMinor`/`remainingMinor` | إغلاق المهمة؛ إشعار | `opId` |
+| `HawlDue` | مُشغِّل الاستدراك | — | تنبيه + مهمة «احتسب زكاة {hijriYear}» | `rem:hawl:{hijriYear}` |
+| `TaskCompleted` | شاشة المهام | `tasks.status='done'`, `completedBy:'user'` | إلغاء تنبيه التأخر | `taskId` |
+| `TaskBecameOverdue` | مُشغِّل الاستدراك | — | تنبيه | `{taskId}:{today}` |
+| `ReminderFired` | مُشغِّل الاستدراك | `reminders.lastFiredKey` | إنشاء الإشعار بمعرّف حتمي | `{reminderId}:{fireKey}` |
+| `RecurrenceCaughtUp` | `runCatchUp` | القيود/الدورات المستحقة (كل واحدة بمعاملتها) | تقرير «أُنشئ {n} بنداً» | `{recurrenceId}:{occurrenceKey}` |
+| `MissedOccurrencesDetected` | `planCatchUp` حين `> maxBackfillDays` | — | شاشة «مواعيد فائتة» للاختيار. **لا إنشاء صامت** | `{recurrenceId}:{today}` |
+| `IntegrityDriftDetected` | `runReconciliation` | `notifications` (حرج) + تقرير | شريط أحمر + شاشة «سلامة البيانات» | `{accountId}:{today}` |
+| `TrialBalanceBroken` | `auditTrialBalance` | — | **تعطيل الترحيل** + `TRIAL_BALANCE_BROKEN` | `{today}` |
+| `RebuildStarted` / `RebuildFinished` | `rebuildProjections` | `meta/integrity` + `auditLogs` | وضع «قراءة فقط»؛ ثم إشعار النتيجة | `rebuild:{startedAt}` |
+| `PendingCommandRejected` | مُفرِّغ الطابور | `pendingCommands.status='rejected'` + `rejectionMessageAr` | تنبيه قابل للنقر لتعديل العملية أو حذفها | `opId` |
+| `DataExported` | `exportAllJson` | `auditLogs` | إعادة ضبط تذكير النسخ الاحتياطي (ق-1) | `{exportedAt}` |
+
+### 12.3 القواعد الصلبة للمُستجيبات
+
+| # | القاعدة | الفرض |
+|---|---|---|
+| **1** | مُستجيب **لا يكتب** في: `journalEntries`, `postings`, `accounts`, `periods`, `accountPeriods`, `budgetPeriods`, `obligations`, `debts`, `financialGoals` | قاعدة ESLint مقترحة **B12** |
+| **2** | كل مستند يُنشئه مُستجيب له **معرّف حتمي** مشتق من `idempotencyKey` | مراجعة + اختبار «شغّل المُستجيب 50 مرة» |
+| **3** | فشل مُستجيب **لا يُفشل** العملية المالية ولا يُعيدها | المُستجيبات بعد الـ commit، وأخطاؤها تُسجَّل وتُعرض بلطف |
+| **4** | مُستجيب **لا يُطلق** حدثاً آخر (لا تسلسل) | عمق أقصى = 1. يمنع حلقات لا نهائية |
+| **5** | كل مُستجيب **قابل للتشغيل من جديد** عند فتح التطبيق بلا أثر مختلف | ق-1: لا دوال مجدولة ⇒ الاستدراك هو المحرّك الوحيد |
+| **6** | مُستجيب **لا يقرأ** أكثر من 3 مستندات لكل حدث | ميزانية Spark |
+
+**〔جديد〕** `reactors/**` و`domain/events/**` طبقة غير مذكورة في هيكل §21.1 من العقد؛ موضعها المقترح:
+`src/app/reactors/**` (تقرأ وتكتب مجموعات غير مالية عبر `data/repos`)، مع إضافتها إلى
+`eslint-plugin-boundaries` بقاعدة **B12** ⇒ §17.
+
+---
+
+## 13. الوحدات غير المالية: المفكرة والعبادات
+
+### 13.1 المفكرة `notes` 〔جديد〕
+
+```ts
+// users/{uid}/notes/{noteId}
+export interface Note {
+  id: string;
+  ownerUid: string; schemaVersion: number;
+  title: string;
+  /** محرر بسيط: عناوين وقوائم وتنسيق أساسي (المتطلبات §13). */
+  bodyMarkdown: string;
+  /** للبحث داخل الملاحظات بلا خدمة بحث خارجية. */
+  searchText: string;            // عنوان + نص بلا تنسيق، lowercase
+  notebookId?: string;
+  tags: string[];
+  pinned: boolean;
+  status: 'active' | 'archived';
+  /** ربط اختياري — **قراءة فقط في الاتجاهين، لا أثر مالي** (المتطلبات §13). */
+  linkedTaskId?: string;
+  linkedGoalId?: string;
+  linkedObligationId?: string;
+  linkedEntryId?: string;        // «لماذا أنفقت هذا المبلغ»
+  createdAt: Timestamp; updatedAt: Timestamp;
+}
+// users/{uid}/notebooks/{notebookId}: { name, colorToken, sortOrder, status }
+```
+
+**قاعدة صلبة:** الربط بقيد (`linkedEntryId`) **لا يعدّل القيد ولا يضيف حقلاً إليه**؛ الاتجاه من
+الملاحظة إلى القيد فقط. السبب: `JournalEntry.refs` **لا يُعدَّل على قيد مرحَّل** (جدول 8.2 من العقد
+يصنّف `refs.*` ضمن «عكس + بديل») ⇒ ربط ملاحظة بقيد قديم **مستحيل** لو كان الاتجاه معاكساً.
+(والعقد يحتفظ بـ `refs.noteId` للربط **لحظة الإنشاء** فقط.)
+
+### 13.2 العبادات `worshipRecords` و`quranProgress` 〔جديد〕
+
+```ts
+// users/{uid}/worshipRecords/{YYYY-MM-DD}      ← **مستند واحد لكل يوم**
+export interface WorshipDay {
+  id: DateKey;                   // المعرّف هو التاريخ ⇒ idempotent بلا منطق
+  ownerUid: string; schemaVersion: number;
+  dateKey: DateKey;
+  hijriDate: string;
+  prayers: Record<'fajr'|'dhuhr'|'asr'|'maghrib'|'isha', {
+    status: 'notRecorded' | 'onTime' | 'late' | 'inCongregation' | 'missed';
+    note?: string;
+  }>;
+  dhikr: { morning: boolean; evening: boolean; istighfarCount?: number };
+  fasting?: 'none' | 'voluntary' | 'obligatory' | 'makeUp';
+  /** صدقة **غير مالية** — مجرد تسجيل متابعة. المالية تُسجَّل مصروفاً على expense.charity. */
+  charityDone?: boolean;
+  linkedCharityEntryId?: string;
+  notes?: string;
+  updatedAt: Timestamp;
+}
+
+// users/{uid}/quranProgress/{YYYY-MM-DD}
+export interface QuranDay {
+  id: DateKey; ownerUid: string; schemaVersion: number;
+  dateKey: DateKey;
+  pagesRead?: number; versesRead?: number;
+  fromSurah?: number; fromAyah?: number; toSurah?: number; toAyah?: number;
+  dailyTargetPages?: number;     // من settings
+  completed: boolean;
+  notes?: string;
+  updatedAt: Timestamp;
+}
+```
+
+**ثلاثة قرارات:**
+
+| القرار | البديل المرفوض | السبب |
+|---|---|---|
+| **مستند واحد لكل يوم، معرّفه التاريخ** | مستند لكل صلاة | 5 مستندات × 365 = 1825 مستند/سنة على Spark، وتحديث الصلاة الواحدة يكتب مستنداً كاملاً. والمعرّف اليومي **يمنع التكرار بنيوياً** بلا أي منطق |
+| **`'notRecorded'` حالة صريحة** | غياب الحقل يعني «لم تُصلَّ» | **حكم على المستخدم لم يطلبه** — المتطلبات §15 تمنع «الأحكام أو التقييمات الدينية». الفارق بين «لم أسجّل» و«لم أصلِّ» **جوهري** |
+| **لا مواقيت صلاة مُقدَّرة** | مواقيت تقريبية مؤقتة | المتطلبات §15/١ نصّاً: «دون أوقات ثابتة أو تقديرية غير موثوقة». والمواقيت تنتظر مصدراً موثوقاً وطريقة حساب مُعلَنة |
+| **لا نصّ قرآني قبل مصدر مراجَع** | تضمين نصّ من مصدر غير موثَّق | المتطلبات §15/٢: «مصدر موثوق ومراجَع (دقة النص والتشكيل وترقيم الآيات)» |
+
+**الأثر المالي: صفر.** الاستثناء الوحيد: الصدقة المالية **مصروف عادي** على `expense.charity`
+(موسوم `tags ∋ 'charity'` ومن غير وسم `zakat`)، و`worshipRecords.linkedCharityEntryId` **إشارة
+عرض فقط**.
+
+---
+
+## 14. التقارير — كل رقم ومصدره
+
+**«لا شاشة دون تحديد مصدر بياناتها» (المتطلبات §25/٥). والتقارير تكتب لا شيء.**
+
+| التقرير (المتطلبات §16) | المصدر الدقيق | قراءات | ملاحظة منع الازدواج |
+|---|---|---|---|
+| يومي | `journalEntries where bookedAt == d order by bookedAtTs` | ≤30 | يشمل `reversal` ⇒ المجموع يطابق الرصيد |
+| أسبوعي | `postings where bookedAt in [a..b]` ⇒ `sum(signedAmountMinor)` مجمَّعاً بالنوع | 2–4 | — |
+| شهري | `periods/{pk}` | **1** | **«نشاط الفترة» و«تصحيحات فترات سابقة» سطران منفصلان** (I9) |
+| سنوي | `periods` ×12 | 12 | الأشهر المنتهية تُخزَّن محلياً ⇒ 0 لاحقاً |
+| الدخل | `incomeBySource` من `periods`، أو `postings where accountType=='income'` | 1 أو 2 | **لا يشمل الاقتراض ولا التحصيل — بنيوياً** |
+| المصروفات | `expenseByCategory` من `periods` | 1 | **لا يشمل السداد ولا الإقراض ولا التحويل ولا قسط التمويل** |
+| الديون عليّ | `debts where direction=='payable' && status in [open, partiallySettled]` + أرصدة `liability.payable.*` | ≤20 | **مصدران مستقلان لنفس الرقم** ⇒ تقاطع يكشف الانحراف (I6b) |
+| الديون لي | `debts where direction=='receivable' …` + أرصدة `asset.receivable.*` | ≤20 | **لا تُجمع مع النقد** (R9) |
+| الالتزامات القادمة | `obligations where status in ['upcoming','due'] order by dueDate` | ≤20 | **يجب استثناء `cancelled`** ⇒ §17/٣ |
+| الالتزامات المتأخرة | `obligations where status == 'overdue' order by dueDate` | ≤20 | المحوَّلة إلى ديون **خرجت** (`cancelled`) ⇒ لا ازدواج |
+| **مصاريف المنزل** | `periods.householdExpenseMinor` (إجمالي) + `postings where tags ∋ 'household' && periodKey == pk` (تفصيل) | 1 + 2 | **مجموع فرعي** — §5 كاملاً. ولا يُجمع مع أي رقم |
+| الميزانية والانحرافات | `budgetPeriods/{pk}` + `periods/{pk}` | 2 | `overallSpentMinor === Σ categories[*].spentMinor` (I16) |
+| الادخار والأهداف | `financialGoals` + أرصدة `equity.earmark.*` | ≤10 | I20 و I21 يربطانهما |
+| حركة الحسابات | `journalEntries where accountIds array-contains id order by bookedAtTs desc` | 25/صفحة | يشمل `reversal` **إلزاماً** وإلا لم يطابق المجموع الرصيد |
+| التدفق النقدي | `periods.netCashFlowMinor` ×12 | 12 | I9 يضمن المعادلة مع التصحيحات |
+| اتجاه رصيد حساب | `accountPeriods where accountId == id order by periodKey` ⇒ **تجميع تراكمي** | ≤12 | ADR-009: لا لقطات مخزونية ⇒ القيد بتاريخ ماضٍ يصحّح كل الأشهر تلقائياً |
+| المهام والإنجازات | `tasks where status=='done' && completedAt in [a..b]` | ≤50 | يُفصَّل `completedBy` (مستخدم / من كيان مرتبط) |
+| متابعة العبادات | `worshipRecords where dateKey in [a..b]` + `quranProgress` | ≤62 | صفر أثر مالي |
+| **أي بُعد مخصّص** (فئة × وسم × جهة × فترة) | `getAggregateFromServer(sum('signedAmountMinor'))` على `postings` | **2** | التصافر التلقائي للعكس ⇒ **بلا أي مرشّح دورة حياة** |
+
+**ثلاث قواعد على كل تقرير:**
+
+1. **لا مكوّن واجهة يجمع أو يطرح مبالغ** — كل رقم من محدِّد في `domain/selectors/**` (مفروض بأداة البناء).
+2. **التصدير يحمل أعمدة `status`, `reversesEntryId`, `replacesEntryId`** لقابلية التدقيق (§8.6 من العقد).
+3. **اختبار `T-REPORTS` شرط نشر:** مجموع `periods` لسنة = المجموع المحسوب من الصفر من القيود =
+   `sum(signedAmountMinor)` على `postings` — **على بيانات فيها إلغاءات وتعديلات**.
+
+---
+
+## 15. الإعدادات — أثر كل مفتاح
+
+```ts
+// users/{uid}/settings/app  〔تابع، بمخطط مكتمل للحقول التي تمسّ التكامل〕
+export interface AppSettings {
+  id: 'app';
+  ownerUid: string; schemaVersion: number;
+
+  profile: { displayName: string; photoUrl?: string; };   // «محمد إبراهيم البرشي» افتراضاً
+  locale: { language: 'ar'; direction: 'rtl'; numerals: 'latn'; };  // ق-3 — بلا مفتاح تبديل
+  display: {
+    theme: 'light' | 'dark' | 'system';
+    amountDecimals: 0 | 2 | 3;            // البطاقات والمخططات فقط؛ الجداول 3 دائماً
+    dateFormat: 'gregorian' | 'bothWithHijri';
+  };
+  finance: {
+    currency: 'LYD';
+    defaultExpenseAccountId?: string;
+    defaultIncomeAccountId?: string;
+    /** **معطَّل في الإصدار الأول (ADR-008)**: محور تقرير منفصل، لا يمسّ periodKey. */
+    fiscalMonthStartDay: 1;
+  };
+  budgets: { defaultAlertAtPercent: number; };            // 80
+  tasks: {
+    autoFromObligations: boolean;                          // **false افتراضاً** — §11.3
+    autoTaskTrigger: 'onDue' | 'onOverdue';
+    autoTaskMinPriority: 1 | 2 | 3;
+  };
+  notifications: Record<NotificationKind, boolean>;        // تفعيل/إيقاف لكل نوع (المتطلبات §17)
+  recurrence: { maxBackfillDays: number; };                // 120 (§10.4 من العقد)
+  worship: { city?: string; calculationMethod?: string; quranDailyTargetPages?: number; };
+  zakat: { lastNisabMinor?: number; lastNisabSourceAr?: string; hawlReminderDays: number; };
+  backup: { lastExportAt?: string; remindEveryDays: number; };  // ق-1: التصدير اليدوي
+  updatedAt: Timestamp;
+}
+```
+
+| المفتاح | ما يتأثر فوراً | ما **لا** يتأثر |
+|---|---|---|
+| `display.amountDecimals` | البطاقات والمخططات | **الجداول والتفاصيل والتصدير — 3 خانات دائماً**، والتخزين **أبداً** |
+| `display.theme`, `dateFormat` | العرض فقط | البيانات |
+| `locale.numerals` | **مثبّت `latn` بق-3، لا مفتاح تبديل** | — |
+| `finance.defaultExpenseAccountId` | القيمة الأولية في نماذج الإدخال | أي قيد قائم |
+| `finance.fiscalMonthStartDay` | **لا شيء في الإصدار الأول** (ADR-008) | `periodKey` على أي قيد — **محرَّم** |
+| `budgets.defaultAlertAtPercent` | الميزانيات **الجديدة** فقط | `alertAtPercent` المحدَّد سابقاً لفئة |
+| `tasks.autoFromObligations` | التوليد **من لحظة التفعيل**؛ **لا استدراك للماضي** | المهام القائمة |
+| `notifications[kind] = false` | **يُوقف الإنشاء**، ولا يحذف القائم | الكيانات المصدر |
+| `recurrence.maxBackfillDays` | ما يُولَّد تلقائياً مقابل ما يُعرض «مواعيد فائتة» | الدورات المادّية فعلاً |
+| `zakat.lastNisabMinor` | **قيمة مقترحة في الشاشة فقط** | أي `zakatRecord` قائم — لقطته مخزَّنة |
+| `backup.remindEveryDays` | تذكير النسخ الاحتياطي | — |
+
+**عمليات الإعدادات الخطرة وما تُجمّده:**
+
+| العملية | الأثر |
+|---|---|
+| `periodLocks` إقفال فترة | **يمنع كل قيد** في تلك الفترة (I17 من الخادم). والتصحيح بتاريخ اليوم بـ `isPriorPeriodCorrection` |
+| `rebuildProjections` | **يُجمّد كل الوحدات المالية** (`rebuildStatus='running'` ⇒ القواعد ترفض كل قيد — I24)، والواجهة «قراءة فقط»، و`pendingCommands` تبقى في الطابور |
+| `exportAllJson` | قراءة كاملة + `auditLogs: 'dataExported'`. **النسخة الاحتياطية الوحيدة على Spark (ق-1)** |
+| إضافة UID احتياطي | **تغيير `firestore.rules` ونشرها** ⇒ قرار مالك (§17/أ) |
+
+---
+
+## 16. ثوابت التكامل والاختبارات
+
+### 16.1 ثوابت التكامل M-I1…M-I18
+
+**الترقيم `M-I*` مقصود لئلا يتعارض مع `I1…I24` في العقد. وكل ثابت هنا جملة قابلة للتحويل المباشر
+إلى اختبار وحدة.**
+
+| # | الثابت | أين يُفرض | التكلفة |
+|---|---|---|---|
+| **M-I1** | كل قيد يمسّ حساب `expense` يحمل **وسم نطاق واحداً بالضبط** من `{personal, household}` | طبقة النطاق (`assertSingleScopeTag`) | 0 |
+| **M-I2** | كل قيد فئته تحت شجرة `expense.home` يحمل الوسم `household` | طبقة النطاق | 0 |
+| **M-I3** | `periods.obligationPaidMinor === الجزء المصروفي + financingPaidMinor`، والجزء المصروفي ⊆ `totalExpenseMinor` | الفاحص | 1 قراءة |
+| **M-I4** | `periods.financingPaidMinor ≤ obligationPaidMinor` | الفاحص (ويُقترح فرضه في قاعدة `periods`) | 0 |
+| **M-I5** | `periods.totalExpenseMinor − householdExpenseMinor >= 0` | نتيجة I15 المفروض من الخادم | 0 |
+| **M-I6** | `periods.householdExpenseMinor === sum(signedAmountMinor)` على `postings where tags ∋ 'household' && accountType=='expense' && periodKey==pk` | الفاحص بالتجميع الخادمي | **2 قراءات** |
+| **M-I7** | **لا حقل باسم `*spentMinor` في أي مجموعة خارج `budgetPeriods`** | قاعدة ESLint مقترحة **B11** | 0 |
+| **M-I8** | لا يوجد دين له `installments[]` **و** التزامات تشير إليه معاً | طبقة النطاق + الفاحص | 1 قراءة/دين |
+| **M-I9** | `netWorthMinor === Σ equity.balanceMinor + Σ income.balanceMinor − Σ expense.balanceMinor` | الفاحص من لقطة `accounts` | **0 إضافية** |
+| **M-I10** | `availableCashMinor ≤ Σ asset.balanceMinor`، والفرق = مجموع المستحقات بالضبط | الفاحص | 0 |
+| **M-I11** | `availableCashMinor − spendableCashMinor === Σ account.earmarkedMinor === Σ equity.earmark.*` | الفاحص (مع I20) | 0 |
+| **M-I12** | سجل زكاة `accrued` ⇒ كل دفعاته `Dr liability.zakat`؛ و`calculated` ⇒ كل دفعاته `Dr expense.charity`. **لا خلط** | طبقة النطاق | 0 |
+| **M-I13** | `Σ zakatRecords[accrued, partiallyPaid].remainingMinor === balanceMinor` لحساب `liability.zakat` | الفاحص | 1 قراءة |
+| **M-I14** | `zakatRecord.remainingMinor === zakatDueMinor − paidMinor` و`0 ≤ paidMinor ≤ zakatDueMinor` | قاعدة أمان مقترحة | 0 |
+| **M-I15** | لكل التزام محوَّل إلى دين: `obligations.status == 'cancelled'` **و** يوجد `debts` بـ `notes` يشير إليه **و** قيد واحد بـ `refs.obligationId` و`kind=='borrow'` | الفاحص | 2 قراءات |
+| **M-I16** | كل `AppNotification.id` يطابق `^notif:[a-zA-Z]+:[^:]+:[^:]+$` — **لا `autoId` إطلاقاً** | قاعدة أمان مقترحة على `notifications` | 0 |
+| **M-I17** | لكل التزام فُعِّل له توليد المهام: **مهمة واحدة بالضبط** بمعرّف `task:obl:{obligationId}` | الفاحص + `create` لا `set` | 1 قراءة |
+| **M-I18** | كل مستند `periods/{pk}` يحتوي **كل** الحقول الرقمية المعلنة في `PeriodSummary` (ولو بصفر) | دلتا الفترة الكاملة (§17/٢) + الفاحص | 1 قراءة |
+
+### 16.2 الاختبارات الإلزامية المضافة
+
+| المجموعة | المحتوى | البيئة |
+|---|---|---|
+| **T-HH-1…8** | جدول §5.5 كاملاً (الازدواج المنزلي) | وحدة + محاكي |
+| **T-SCOPE** | وسم النطاق: صفر وسوم ⇒ يُضاف `personal`؛ وسمان ⇒ رفض؛ فئة `expense.home` بلا وسم ⇒ يُضاف `household` | وحدة |
+| **T-OBLDEBT-1** | تحويل التزام إلى دين: الالتزام `cancelled` و`paidMinor` **لم يتغيّر**، والدين `principalMinor == remaining` السابق، والقيد `borrow`، و**«إجمالي المستحق» لم يتضاعف** | محاكي |
+| **T-OBLDEBT-2** | تحويل مرتين بنفس `opId` ⇒ `alreadyApplied` **بصفر كتابات**؛ وبحمولة مختلفة ⇒ `OP_ID_CONFLICT` | محاكي |
+| **T-OBLDEBT-3** | التزام `nature='financing'` يُحوَّل ⇒ `totalExpenseMinor` **لا يتغيّر** و`liability.financing` ينقص و`liability.payable` يزيد | محاكي |
+| **T-OBLDEBT-4** | التزام منزلي يُحوَّل ⇒ الوسم يُورَّث و`householdExpenseMinor` يزيد **مرة واحدة** | محاكي |
+| **T-BORROW** | اقتراض 1000 نقداً ⇒ النقد `+1000`، `totalIncomeMinor` **صفر تغيير**، `netCashFlowMinor` **صفر تغيير**، `netWorthMinor` **صفر تغيير**، `borrowedMinor += 1000` | وحدة + محاكي |
+| **T-LEND** | إقراض 500 ⇒ النقد `−500`، `totalExpenseMinor` **صفر**، `budgetPeriods` **لم تُلمس**، `netWorthMinor` **صفر** | وحدة + محاكي |
+| **T-WEALTH** | على 50 عملية مختلطة: M-I9 و M-I10 و M-I11 تصحّ؛ وصافي الثروة **لا يتغيّر** بإنشاء أو إلغاء التزام | وحدة |
+| **T-FORECAST** | `projectedSpendableMinor` **لا يُستخدم** في أي بطاقة اسمها «صافي الثروة»، ويُرجع `assumptionsAr` غير فارغة | وحدة |
+| **T-EARMARK-HARD** | حجز 500 ⇒ مصروف 600 من رصيد 1000 **يمضي بتحذير**؛ وبعد رفع `minBalanceMinor=500` ⇒ **القاعدة ترفضه من الخادم** | محاكي |
+| **T-GOAL-RELEASE** | أرشفة هدف وله حجز ⇒ `GOAL_HAS_EARMARK`؛ وبعد `releaseEarmark` ⇒ تنجح، و I20/I21 يصحّان | محاكي |
+| **T-ZAKAT-1** | الاحتساب ⇒ **صفر قيود وصفر تغيير في أي رصيد** (مقارنة لقطتين كاملتين قبل/بعد) | محاكي |
+| **T-ZAKAT-2** | `mulRate(zakatBaseMinor, 250)` على وعاء `10^12` ⇒ النتيجة الصحيحة بالضبط مقارنةً بمرجع `BigInt` — **يفشل عند استخدام `number`** | وحدة |
+| **T-ZAKAT-3** | سجل `accrued` تُدفع دفعته بمسار `expense.charity` ⇒ **رفض** (M-I12)؛ والمسار الصحيح يُطفئ `liability.zakat` ويصحّ M-I13 | محاكي |
+| **T-ZAKAT-4** | وعاء أقل من النصاب ⇒ `belowNisab` و`zakatDueMinor == 0` و**لا إمكانية إقرار** | وحدة |
+| **T-ZAKAT-5** | `nisabSourceAr` فارغ ⇒ **رفض الحفظ** (لا بيانات بلا مصدر) | وحدة |
+| **T-TASK-1** | تفعيل التوليد ⇒ فتح التطبيق 50 مرة ⇒ **مهمة واحدة** بمعرّف `task:obl:{id}` | محاكي |
+| **T-TASK-2** | دفع الالتزام بالكامل ⇒ المهمة `done` بـ `completedBy:'systemFromLinkedEntity'`؛ وعكس الدفعة ⇒ تعود `open` | محاكي |
+| **T-TASK-3** | سداد جزئي ⇒ المهمة **تبقى مفتوحة** ويتحدّث عنوانها بالمتبقي | محاكي |
+| **T-TASK-4** | إلغاء المستخدم للمهمة المولَّدة ⇒ **لا تُعاد خلقها** عند فتح التطبيق | محاكي |
+| **T-NOTIF-1** | إطلاق كل مُستجيبات التنبيه 50 مرة في اليوم ⇒ **مستند واحد لكل (نوع، كيان، مفتاح)** | محاكي |
+| **T-NOTIF-2** | `settings.notifications[kind] = false` ⇒ **لا إنشاء**، والقائم لا يُحذف | وحدة |
+| **T-REACTOR** | أي مُستجيب يحاول الكتابة على مجموعة مالية ⇒ **خطأ بناء** (B12) وخطأ قواعد في المحاكي | بناء + محاكي |
+| **T-PERIODS-INIT** | أول مصروف **غير منزلي** في شهر جديد ⇒ `periods/{pk}` يُنشأ بكل الحقول (صفر) ⇒ **القاعدة تقبله** (§17/٢) | محاكي |
+| **T-RULES-NEW** | قراءة/كتابة `notes`, `tasks`, `reminders`, `worshipRecords`, `quranProgress`, `zakatRecords`, `householdBudgets` ⇒ **تنجح للمالك المعتمد وترفض لغيره** | محاكي |
+| **T-DASH-OBL** | التزام محوَّل إلى دين ⇒ **لا يظهر** في «القادمة» ولا «المتأخرة» ولا «إجمالي المستحق» (§17/٣) | محاكي |
+
+---
+
+## 17. ثغرات العقد وما يحتاج قرار المالك
+
+> **كل بند هنا ثغرة أو تعارض وجدته في `01-financial-core.md` أو قراراً يخصّ المالك.
+> لم أغيّر العقد، ولم أخترع جواباً حيث لا جواب.**
+
+### 17.1 ثغرات تمنع عمل وحدات كاملة — **تُصلَح قبل أي كود**
+
+| # | الثغرة | الأثر الفعلي | الحل المقترح |
+|---|---|---|---|
+| **١** | **لا `match` في §14.3 لمجموعات:** `notes`, `notebooks`, `tasks`, `taskLists`, `reminders`, `worshipRecords`, `quranProgress`, `zakatRecords`, `householdBudgets`, `attachments` | قواعد Firestore ترفض افتراضياً ما لا قاعدة له، و§14.3 تُصرّح `allow write: if false` على مستوى `users/{uid}` ⇒ **المفكرة والمهام والتذكيرات والعبادات والزكاة لا تعمل إطلاقاً**، بـ `permission-denied` عند أول كتابة. **وهو حرفياً نفس العيب ع-أ-9** الذي أُصلح للمجموعات المالية ونُسي في غير المالية | إضافة `match` لكل مجموعة بنفس نمط §14.3 (مسوّدة في §17.4)، + اختبار `T-RULES-NEW` |
+| **٢** | **قاعدة `periods` تقرأ حقلاً قد لا يُكتب:** الشرط `request.resource.data.householdExpenseMinor <= request.resource.data.totalExpenseMinor` مقابل §12.1 التي تكتب الحقل **فقط** إن `tags ∋ 'household'` | على مستند `periods/{pk}` **جديد** (أول عملية في الشهر) غير منزلي، الحقل **غائب** ⇒ تقييم الشرط على حقل غير موجود ⇒ **أول مصروف في كل شهر جديد قد يُرفض** برسالة `permission-denied` لا تشرح شيئاً | **دلتا الفترة تحمل كل الحقول الرقمية دائماً** (0 لغير الملموس) ⇒ المستند يُنشأ كاملاً من أول `set(merge)`. مقتطف في §17.3. **و/أو** تُكتب القاعدة بنمط آمن: `(!('householdExpenseMinor' in request.resource.data) \|\| ...)`. **الطبقتان معاً أفضل** |
+| **٣** | **محدِّد الالتزامات لا يستثني `cancelled`:** §5.3 تنصّ `obligations where remainingMinor > 0 order by dueDate limit 10` | التزام ملغى أو **محوَّل إلى دين** يبقى `remainingMinor > 0` ⇒ يظهر في «القادمة/المتأخرة» و«إجمالي الالتزامات المستحقة» ⇒ **ازدواج مع الدين الذي حلّ محلّه** | المحدِّدات تصير: القادمة `where status in ['upcoming','due']`، المتأخرة `where status == 'overdue'`، والإجمالي `where status in ['upcoming','due','overdue','partiallyPaid']`. والفهرس `obligations: status + dueDate ASC` **موجود أصلاً** في §15.5 |
+| **٤** | **تعارض مسار دفع الزكاة:** R11 يصنّف «دفع زكاة ⇒ `expense.charity` ⇒ مصروف»، و`zakatAccrual` ينشئ خصماً على `liability.zakat`. و`EntryKind` **لا تحتوي نوعاً لدفع الزكاة** | تطبيق الاثنين ⇒ `liability.zakat` **لا يُطفأ أبداً** (خصم أبدي يخفض صافي الثروة للأبد) **ومصروف مسجَّل بلا مقابل** ⇒ خطأ مزدوج لا يكشفه أي ثابت قائم | اعتماد مسارَي §10.5 **حصرياً وبلا خلط** (M-I12 و M-I13)، + **قرار المالك** في §17.2/ب على تسمية النوع: استخدام `debtRepayment` (شكله مطابق لقائمة `ALLOWED`) أم إضافة `zakatPayment` بـ ADR |
+| **٥** | **`ObligationStatus` بلا `converted`** و`Obligation` بلا حقل ربط بالدين | الالتزام المحوَّل يُسجَّل `cancelled` ⇒ **لا تمييز في التقارير** بين «ألغيته» و«صار ديناً»، والربط نصّي في `notes` ⇒ غير قابل للاستعلام | **ADR-023 مقترح:** إضافة `'converted'` إلى `ObligationStatus` + حقلي `convertedToDebtId?` و`convertedAt?`، ومقابلهما `sourceObligationId?` على `Debt`. وحتى إقراره: `cancelled` + `notes` + `auditLogs` + `refs.obligationId` على القيد (M-I15) |
+| **٦** | **`OperationKind` و`EntryKind` بلا:** `convertObligationToDebt`, `releaseEarmark`, `payZakat` كنوع قيد | عمليات مطلوبة في المتطلبات (§15.4 الزكاة، §12 الأهداف) **بلا نوع معرَّف** ⇒ إما استخدام نوع آخر بدلالة ملتبسة أو كسر العقد | **ADR-023/024:** إضافة `convertObligationToDebt` و`releaseEarmark` إلى `OperationKind`؛ و`EntryKind`: استخدام `borrow` للتحويل (صحيح دلالياً: اعتراف بالأجل) و`earmark` للتحرير (نفس الشكل بجانب مقلوب) و**القرار في ٤ لدفع الزكاة** |
+| **٧** | **تنبيهات بمعرّف `autoId`:** §12.1 و§12.4 تكتبان `notifications/{autoId}` | يعتمد منع التكرار على `alertFiredAtPercent` وحده. وأي مسار تنبيه **خارج** معاملة (كل تنبيهات التواريخ) **بلا حارس أصلاً** ⇒ تنبيه مكرّر عند كل فتح للتطبيق — خرق مباشر للمتطلبات §17 | **معرّف حتمي دائماً**: `notif:{kind}:{entityId}:{key}` (M-I16)، وفرضه بقاعدة أمان على `notifications`. **تكلفة صفر، وحاجز بنيوي** |
+| **٨** | **طبقة المُستجيبات غير موجودة في هيكل §21.1** ولا في قواعد `eslint-plugin-boundaries` | أول مُستجيب يُكتب داخل `ui/` أو `data/` بلا حدود ⇒ **مسار كتابة ثانٍ** = الصف 1 في جرد الانحراف (أعلى احتمال على الإطلاق) | إضافة `src/app/reactors/**` إلى الهيكل + **B12**: يُحرَّم على `reactors/**` الكتابة على أي مجموعة مالية؛ و**B11**: يُحرَّم أي حقل `*spentMinor` خارج `budgetPeriods` |
+| **٩** | **`RecurrenceRule.kind` محصور في `'expense' \| 'income' \| 'obligation'`** | لا يمكن جدولة تخصيص ادخار دوري ولا مهمة متكرّرة ولا تذكير متكرّر بنفس المحرّك ⇒ إما محرّك ثانٍ (تكرار منطق — خرق §25/٧) أو الميزة تسقط | **ADR مقترح:** إضافة `'task' \| 'reminder' \| 'earmark'` إلى `kind`، مع بقاء **كل** التوليد بالمعرّف الحتمي ومُشغِّل الاستدراك الواحد |
+| **١٠** | **`PeriodSummary` بلا حقل لمجموع «غير مالي»** مثل عدد المهام أو الإنجازات | تقرير «المهام والإنجازات» (المتطلبات §16) يُحسب باستعلام مباشر على `tasks` | **مقبول ولا يحتاج تغييراً**: التقرير غير مالي، وتكلفة استعلامه ≤50 قراءة. **مذكور للتوثيق لا للإصلاح** |
+
+### 17.2 قرارات تحتاج المالك
+
+| # | السؤال | الخيارات | الأثر |
+|---|---|---|---|
+| **أ** | **سقف ميزانية المنزل:** هل يُبنى في الإصدار الأول أم يُؤجَّل؟ وهل بسقف إجمالي واحد أم بسقوف لفئات منزلية؟ | (1) إجمالي واحد فقط (المقترح)، (2) + سقوف فئات منزلية، (3) تأجيل كامل والاكتفاء بعرض الفعلي | مجموعة `householdBudgets` + شاشة + قواعد أمان. **صفر أثر على الدفتر** |
+| **ب** | **تسمية نوع قيد دفع الزكاة المُقرّة:** `debtRepayment` (شكله مطابق، بلا تغيير في العقد) أم `zakatPayment` جديد (أوضح دلالياً، يحتاج ADR + تحديث `ALLOWED` و`kindShape`)؟ | الاثنان صحيحان محاسبياً | يمسّ `EntryKind` ⇒ **لا كود قبل الحسم** |
+| **ج** | **توليد المهام من الالتزامات:** افتراضه **مُطفأ** في هذه الوثيقة. يُقبل أم يُفعَّل افتراضياً؟ وبأي أولوية دنيا؟ | مُطفأ (المقترح) / مُفعَّل للأولوية 1 / مُفعَّل للكل | ضجيج شاشة «مهام اليوم» |
+| **د** | **إزاحات تذكير الالتزامات الافتراضية:** `[-3, 0, +2]` يوماً. مناسبة؟ | أي مجموعة أيام | عدد التنبيهات اليومية |
+| **هـ** | **طرح الديون المؤجَّلة من وعاء الزكاة:** افتراضه **لا تُطرح** مع خيار صريح للمستخدم. يُقبل؟ | لا تُطرح (المقترح) / تُطرح كلها / تُطرح أقساط سنة واحدة | **رقم الزكاة** — مسألة فقهية، والنظام إرشادي ويُظهر الافتراض |
+| **و** | **أساس النصاب الافتراضي:** ذهب 85غ أم فضة 595غ؟ (الفضة تُنتج نصاباً أدنى ⇒ زكاة أكثر حالات) | `gold85g` (الأكثر شيوعاً) / `silver595g` | قيمة افتراضية في الشاشة فقط؛ القيمة نفسها **مُدخَل مستخدم دائماً** |
+| **ز** | **وضع الأهداف الافتراضي:** `virtualEarmark` (المقترح) أم `backedAccount`؟ | — | تجربة إنشاء الهدف فقط |
+| **ح** | **عرض «توقّع 30 يوماً» في لوحة التحكم:** يُعرض أم يُخفى؟ ونافذته 7/30/90؟ | — | بطاقة واحدة؛ صفر أثر على البيانات |
+| **ط** | **تقرير «الزكاة المدفوعة»:** يُصفّى بوسم `tags ∋ 'zakat'` على قيود `expense.charity`. هل تُفصل الصدقة التطوعية عن الزكاة في حسابين (`expense.charity` و`expense.zakat`) بدل الوسم؟ | وسم (المقترح، بلا تغيير في الشجرة) / حسابان | شجرة الحسابات في §3.2 من العقد |
+
+### 17.3 مقتطف الإصلاح المقترح لثغرة §17.1/٢ (دلتا الفترة الكاملة)
+
+```ts
+// domain/ops/periodDelta.ts  — الإصلاح المقترح
+/**
+ * **كل** الحقول الرقمية حاضرة دائماً، ولو بصفر.
+ * السبب: أول set(merge) على periods/{pk} جديد يجب أن يُنتج مستنداً **كامل الشكل**،
+ * وإلا قيّمت قاعدة الأمان (householdExpenseMinor <= totalExpenseMinor) حقلاً غائباً.
+ * وبالمناسبة: هذا يُصحّح أيضاً I14 و I9 على المستند الجديد.
+ */
+export interface PeriodDelta {
+  totalIncomeMinor: Minor;                     // 0 إن لم يُلمس
+  totalExpenseMinor: Minor;
+  householdExpenseMinor: Minor;                // 0 دائماً حاضر
+  transferVolumeMinor: Minor;
+  borrowedMinor: Minor;  repaidMinor: Minor;
+  lentMinor: Minor;      collectedMinor: Minor;
+  obligationPaidMinor: Minor;  financingPaidMinor: Minor;
+  priorPeriodExpenseCorrectionMinor: Minor;
+  priorPeriodIncomeCorrectionMinor: Minor;
+  netCashFlowMinor: Minor;
+  entryCount: number;
+  expenseByCategory: Record<string, Minor>;    // قد تكون فارغة
+  incomeBySource: Record<string, Minor>;
+}
+
+export const ZERO_PERIOD_DELTA: PeriodDelta = { /* كل الحقول 0 */ } as PeriodDelta;
+
+/** ثابت M-I18: كل مستند periods يحتوي كل الحقول. */
+export function buildPeriodDelta(patch: Partial<PeriodDelta>): PeriodDelta;
+```
+
+### 17.4 مسوّدة قواعد الأمان للمجموعات الجديدة (إصلاح §17.1/١)
+
+> **تُضاف داخل `match /users/{uid}` في `firestore.rules`، بنفس أسلوب §14.3: شروط مشتركة لا بديلة،
+> وأقواس صريحة، ومنع الحذف حيث يلزم.** و«القواعد ليست جاهزة لمجرد كتابتها» (المتطلبات §25/١٠) ⇒
+> لا تُنشر قبل الاختبار بالمحاكي والموافقة.
+
+```javascript
+      // ── المفكرة ──────────────────────────────────────────────
+      match /notes/{id} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.ownerUid == uid
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.title.size() <= 200
+          && request.resource.data.bodyMarkdown is string
+          && request.resource.data.bodyMarkdown.size() <= 50000
+          && request.resource.data.status in ['active','archived'];
+        allow delete: if false;                      // أرشفة بدل الحذف
+      }
+      match /notebooks/{id} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && request.resource.data.ownerUid == uid;
+        allow delete: if false;
+      }
+
+      // ── المهام ───────────────────────────────────────────────
+      match /tasks/{id} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.ownerUid == uid
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.status in ['open','inProgress','done','cancelled']
+          && request.resource.data.priority in [1,2,3]
+          && request.resource.data.source in ['user','obligation','debt','goal','zakat','integrity']
+          // المتطلبات §14: لا إكمال بلا إجراء صريح — المصدر مُسجَّل إلزامياً
+          && ( request.resource.data.status != 'done'
+               || request.resource.data.completedBy in ['user','systemFromLinkedEntity'] );
+        allow delete: if false;                      // إلغاء بدل الحذف
+      }
+      match /taskLists/{id} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && request.resource.data.ownerUid == uid;
+        allow delete: if false;
+      }
+
+      // ── التذكيرات ────────────────────────────────────────────
+      match /reminders/{id} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.ownerUid == uid
+          && request.resource.data.offsetDays is list
+          && request.resource.data.offsetDays.size() <= 6
+          && request.resource.data.status in ['active','paused']
+          && request.resource.data.channels is list;   // لا FCM (ق-1)
+        allow delete: if isOwner(uid);                 // ليست سجلاً محاسبياً
+      }
+
+      // ── العبادات ─────────────────────────────────────────────
+      match /worshipRecords/{dateKey} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.ownerUid == uid
+          && dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.dateKey == dateKey;  // المعرّف هو التاريخ ⇒ idempotent
+        allow delete: if false;
+      }
+      match /quranProgress/{dateKey} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.ownerUid == uid
+          && dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.dateKey == dateKey
+          && ( !('pagesRead' in request.resource.data)
+               || isNonNegInt(request.resource.data.pagesRead) );
+        allow delete: if false;
+      }
+
+      // ── الزكاة: الاحتساب لا يمسّ مالاً، لكن أرقامه تُفحص ──────
+      match /zakatRecords/{id} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.ownerUid == uid
+          && isNonNegInt(request.resource.data.zakatBaseMinor)
+          && isNonNegInt(request.resource.data.nisabMinor)
+          && isNonNegInt(request.resource.data.zakatDueMinor)
+          && isNonNegInt(request.resource.data.paidMinor)
+          && request.resource.data.rateBps is int
+          && request.resource.data.rateBps > 0
+          && request.resource.data.rateBps <= 1000000
+          // لا رقم بلا مصدر — المتطلبات §25/٤ و§15.4
+          && request.resource.data.nisabSourceAr is string
+          && request.resource.data.nisabSourceAr.size() > 0
+          // ← M-I14 مفروض من الخادم
+          && request.resource.data.paidMinor <= request.resource.data.zakatDueMinor
+          && request.resource.data.remainingMinor ==
+               request.resource.data.zakatDueMinor - request.resource.data.paidMinor
+          && request.resource.data.status in
+               ['draft','belowNisab','calculated','accrued','partiallyPaid','paid','cancelled'];
+        allow delete: if false;
+      }
+
+      // ── ميزانية المنزل: سقوف فقط، **بلا أي spentMinor** ──────
+      match /householdBudgets/{pk} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.ownerUid == uid
+          && pk.matches('^[0-9]{4}-[0-9]{2}$')
+          && request.resource.data.periodKey == pk
+          && isNonNegInt(request.resource.data.limitMinor)
+          && request.resource.data.alertAtPercent is int
+          && request.resource.data.alertAtPercent > 0
+          && request.resource.data.alertAtPercent <= 100
+          // ← M-I7 مفروض من الخادم: لا مُجمَّع مصروف هنا إطلاقاً
+          && !('spentMinor' in request.resource.data)
+          && !('actualMinor' in request.resource.data);
+        allow delete: if false;
+      }
+```
+
+> **ملاحظة على `notifications`:** لفرض M-I16 يُضاف إلى قاعدتها القائمة في §14.3:
+> `&& id.matches('^notif:[A-Za-z]+:[^:]+:[^:]+$')` — ويبقى الحذف مسموحاً كما هو.
+
+---
+
+## 18. قائمة تحقق التغطية
+
+| المطلوب | القسم | الحالة |
+|---|---|---|
+| جدول شامل لكل وحدة (20 وحدة): تقرأ / تكتب / تتأثر | §3.2 | ✅ + مصفوفة ملكية الكتابة §3.3 |
+| مخطط تدفق الأثر لتسجيل مصروف واحد — **Mermaid** | §4.1 | ✅ |
+| مخطط تدفق الأثر — **جدول بالترتيب الدقيق** | §4.2 | ✅ 11 خطوة + أسلوب الكتابة + الشرطية |
+| رصيد الحساب، الميزانية الشهرية، ميزانية الفئة، ميزانية المنزل، الملخص الشهري، التنبيهات، التقارير | §4.2 + §4.4 + §4.5 | ✅ بما فيه **ما لا يتأثر** |
+| مشكلة الازدواج المنزلي + **القاعدة الحاسمة صراحةً** | §5.3 (ستة بنود) | ✅ |
+| منع الازدواج في المواضع الخمسة بالتفصيل | §5.4 | ✅ جدول بخمسة صفوف + ما كان سيحدث |
+| التزام مقابل دين — الفرق الدقيق | §6.1–6.3 | ✅ جدول + 11 حالة واقعية + شجرة قرار |
+| التزام تأخّر وتحوّل إلى دين — **تصميم الجسر** | §6.4 | ✅ طلب + خوارزمية كاملة + 6 بدائل مرفوضة |
+| الاقتراض 1000 نقداً: لا يظهر دخلاً ولا يتضخم التدفق | §7.1 | ✅ بالقيد والأرقام والبرهان البنيوي |
+| الإقراض 500 ليس مصروفاً | §7.2 | ✅ + متى يصبح مصروفاً (الشطب) |
+| صافي الثروة مقابل النقد المتاح بالمعادلات | §8.1 | ✅ ستّ معادلات بالكود |
+| **حسم:** هل تُطرح الالتزامات المستقبلية؟ + التبرير | §8.2 | ✅ لا تُطرح، بخمسة أسباب + مؤشر توقّع منفصل |
+| الأهداف: حساب فعلي أم تخصيص؟ **حسم وتبرير** | §9.1 | ✅ `virtualEarmark` افتراضاً + 4 بدائل مرفوضة |
+| كيف نمنع صرف المخصَّص دون قصد | §9.2 | ✅ أربع طبقات + المنع الصلب بـ `minBalanceMinor` |
+| الزكاة: ربط الأموال الخاضعة بالحساب الإرشادي | §10.3 | ✅ معادلة + جدول بند بند |
+| الزكاة: الفصل التام بين الاحتساب والدفع | §10.1 + §10.5 | ✅ ثلاث مراحل + جدول أثر + M-I12/13/14 |
+| المهام والتذكيرات والتنبيهات: الفرق بين الثلاثة | §11.1 | ✅ جدول + السلسلة السببية + مخطط |
+| متى يولّد النظام مهمة من التزام | §11.3 | ✅ مُطفأ افتراضاً + مفتاح + تبرير |
+| منع تكاثر المهام المكرّرة | §11.3 | ✅ معرّف حتمي `task:obl:{id}` + `create` لا `set` |
+| قائمة كل الأحداث الداخلية ومن يستمع لها | §12.2 | ✅ 48 حدثاً + المستوى 1/2 + مفتاح التكرار |
+| المفكرة والعبادات والتقارير والإعدادات | §13, §14, §15 | ✅ بمخططات وقرارات |
+| البدائل المرفوضة لكل قرار معماري | §2, 5.2, 5.4, 6.4, 6.5, 7.4, 8.2, 9.1, 9.4, 11.3, 12.1, 13.2 | ✅ |
+| أسماء حقول وتواقيع دوال ومقتطفات فعلية | كل الأقسام | ✅ 14 كتلة TypeScript + كتلة قواعد أمان + 3 مخططات Mermaid |
+| ما يحتاج قرار المالك — بلا اختراع جواب | §17.2 | ✅ 9 قرارات |
+| ثغرات العقد المكتشفة | §17.1 | ✅ 10 ثغرات، منها 4 **تمنع عمل وحدات كاملة** |
+
+---
+
+> **خلاصة هذه الوثيقة في جملتين:**
+> النظام لا يمنع الازدواج بالانتباه، بل بأن **كل مُجمَّع فيه مُصنَّف صراحةً** (بُعد تجزيء أو مجموع فرعي)،
+> **وكل تحويل بين كيانين عملية صريحة ذرّية بمعرّف حتمي**، **وكل رقم غير دفتري مُوسوم بأنه توقّع**.
+> وما لم يحسمه العقد في مجالي، **ذكرته في §17 ولم أخترع له جواباً.**

@@ -92,13 +92,15 @@ export function allocateByWeights(total: Minor, weights: readonly number[]): Min
   let left = magnitude - distributed
 
   // ترتيب الفهارس تنازليًا حسب الباقي، والتعادل بالفهرس الأصغر ⇒ حتمية كاملة.
-  const order = weights.map((_, i) => i).sort((a, b) => {
-    const ra = remainders[a] ?? 0n
-    const rb = remainders[b] ?? 0n
-    if (ra > rb) return -1
-    if (ra < rb) return 1
-    return a - b
-  })
+  const order = weights
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const ra = remainders[a] ?? 0n
+      const rb = remainders[b] ?? 0n
+      if (ra > rb) return -1
+      if (ra < rb) return 1
+      return a - b
+    })
 
   for (const index of order) {
     if (left <= 0n) break
@@ -118,8 +120,5 @@ export function allocateByWeights(total: Minor, weights: readonly number[]): Min
 function assertSumMatches(parts: readonly Minor[], total: Minor): void {
   let acc = 0
   for (const p of parts) acc += p
-  invariant(
-    acc === total,
-    `انتهاك ثابت التوزيع: مجموع الأجزاء ${String(acc)} لا يساوي الكل ${String(total)}`,
-  )
+  invariant(acc === total, `انتهاك ثابت التوزيع: مجموع الأجزاء ${String(acc)} لا يساوي الكل ${String(total)}`)
 }

@@ -15,6 +15,8 @@ export default defineConfig({
       reporter: ['text', 'html'],
       // المنطق المالي النقي لا يُقبل فيه أقل من تغطية شبه كاملة.
       include: ['src/domain/**', 'src/lib/**'],
+      // ملفات الأنواع لا تحمل كودًا تنفيذيًا — إدراجها يشوّه الرقم بلا فائدة.
+      exclude: ['src/domain/types/**', '**/index.ts'],
       thresholds: { lines: 90, functions: 90, branches: 85, statements: 90 },
     },
     // ملاحظة: `environmentMatchGlobs` أُزيل في Vitest 5.

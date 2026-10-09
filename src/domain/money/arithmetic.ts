@@ -71,10 +71,7 @@ export function maxMinor(a: Minor, b: Minor): Minor {
  */
 export function fromMajor(major: number): Minor {
   const scaled = roundHalfAwayFromZero(major * 1000)
-  invariant(
-    Math.abs(major * 1000 - scaled) < 1e-6,
-    `قيمة بالدينار تتجاوز ثلاث خانات عشرية: ${String(major)}`,
-  )
+  invariant(Math.abs(major * 1000 - scaled) < 1e-6, `قيمة بالدينار تتجاوز ثلاث خانات عشرية: ${String(major)}`)
   return assertInRange(scaled)
 }
 

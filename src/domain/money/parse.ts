@@ -10,12 +10,7 @@
 
 import { assertInRange, LYD_EXPONENT, MAX_ABS_MINOR, type Minor } from './types'
 
-export type ParseErrorCode =
-  | 'EMPTY'
-  | 'NOT_A_NUMBER'
-  | 'TOO_MANY_DECIMALS'
-  | 'OUT_OF_RANGE'
-  | 'NEGATIVE'
+export type ParseErrorCode = 'EMPTY' | 'NOT_A_NUMBER' | 'TOO_MANY_DECIMALS' | 'OUT_OF_RANGE' | 'NEGATIVE'
 
 export type ParseResult = { ok: true; value: Minor } | { ok: false; code: ParseErrorCode }
 
