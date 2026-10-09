@@ -30,5 +30,5 @@
     "erasableSyntaxOnly": true,
     "isolatedModules": true
   },
-  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "eslint.config.js"]
+  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "vitest.rules.config.ts", "eslint.config.js"]
 }

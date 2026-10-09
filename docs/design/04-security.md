@@ -310,8 +310,11 @@ Cross-Origin-Opener-Policy: same-origin-allow-popups
 | `tasks` | `tasks` + `taskLists` | **جديد** |
 | `reminders` | `reminders` | **جديد** |
 | `notifications` | `notifications` | النواة 14.3 |
-| `worshipRecords` | `worshipRecords/{YYYY-MM-DD}` | **جديد** |
-| `quranProgress` | `quranProgress/{YYYY-MM-DD}` | **جديد** |
+| `worshipRecords` | **`worshipDays/{YYYY-MM-DD}`** + **`habits/{habitId}`** | **جديد.** الاسم والمخطط من `09-personal-worship.md` §5.1 و§7.1 (ADR-PW-15). **تصحيح اتساق:** هذا الجدول و§6 كانا يسمّيانها `worshipRecords`، و`03-data-model.md` §7.1 يسمّيها `worshipRecords/{YYYY-MM}` **شهرية** — و09 §5.2 يرفض الشهرية بالأرقام. و`habits` كانت **بلا قاعدة** |
+| `quranProgress` | **`quranSessions/{sessionId}`** + `meta/quran` | **جديد.** `09-personal-worship.md` §6.2 (ADR-PW-18): **جلسات لا عدّاد** — التقدّم مشتقّ بالاستعلام. العدّاد التراكمي `pagesRead` مرفوض لأنه لا يُصحَّح ولا يُدقَّق |
+| — | `notes/{id}/content/{docId}` | **جديد.** جسد الملاحظة (ProseMirror JSON) في مستند ثانٍ — 09 §3.1. كانت **بلا قاعدة** ⇒ المحرّر ميت (القواعد لا ترث للمجموعات الفرعية) |
+| — | `budgetTemplates` · `scenarios` · `importBatches` · `fiscalPeriods` | **من `03-data-model.md` §1.3** — كانت كلها **بلا قاعدة** في §6 ⇒ مرفوضة بالكامل. أُضيفت في 5.2ب (و`fiscalPeriods` بمنع صريح، ADR-008) |
+| — | `recurrenceProposals` · `personalRecurrences` · `meta/scheduler` · `settings/recurrence` | **من `07-recurrence-notifications.md` §16.1** — أُضيفت قواعدها هنا، ووُسِّعت قائمتا `meta` و`settings` المغلقتان. **وهي غائبة عن `03-data-model.md` §1.3** ⇒ تسقط من التصدير الكامل إن لم تُضَف هناك |
 | `zakatRecords` | `zakatRecords` | **جديد** — بقاعدة تفصل الاحتساب عن الدفع (القسم 15.4 من المتطلبات) |
 | `attachments` | `attachments` (وصفية) + Storage | مؤجَّلة بق-1، **والقواعد مكتوبة من الآن** |
 | `auditLogs` | `auditLogs` | النواة 4.10 |

@@ -1805,8 +1805,8 @@ export interface QuranDay {
 | حركة الحسابات | `journalEntries where accountIds array-contains id order by bookedAtTs desc` | 25/صفحة | يشمل `reversal` **إلزاماً** وإلا لم يطابق المجموع الرصيد |
 | التدفق النقدي | `periods.netCashFlowMinor` ×12 | 12 | I9 يضمن المعادلة مع التصحيحات |
 | اتجاه رصيد حساب | `accountPeriods where accountId == id order by periodKey` ⇒ **تجميع تراكمي** | ≤12 | ADR-009: لا لقطات مخزونية ⇒ القيد بتاريخ ماضٍ يصحّح كل الأشهر تلقائياً |
-| المهام والإنجازات | `tasks where status=='done' && completedAt in [a..b]` | ≤50 | يُفصَّل `completedBy` (مستخدم / من كيان مرتبط) |
-| متابعة العبادات | `worshipRecords where dateKey in [a..b]` + `quranProgress` | ≤62 | صفر أثر مالي |
+| المهام والإنجازات | `tasks where trashed==false && status=='done' && completedOn in [a..b] order by completedOn desc` | ≤50 | **المفتاح `completedOn` (`DateKey`) لا `completedAt` (`Timestamp`)** — `09` §4.1 و`08` §3.12؛ و`trashed==false` إلزامي وإلا حُسبت مهام السلة |
+| متابعة العبادات | `worshipDays` بالمعرّف في المدى (`periodKey == pk + dateKey ASC`) + `quranSessions where periodKey == pk` | ≤62 | صفر أثر مالي. **المجموعتان من `09` §5.1 و§6.1 — لا `worshipRecords`/`quranProgress`** |
 | **أي بُعد مخصّص** (فئة × وسم × جهة × فترة) | `getAggregateFromServer(sum('signedAmountMinor'))` على `postings` **+ `accountType` إلزاماً** | **⌈n/1000⌉** (لا 2) | التصافر التلقائي للعكس ⇒ **بلا أي مرشّح دورة حياة** |
 
 > ### تصحيح تكلفة إلزامي (ر-12): التجميع الخادمي **ليس بقراءتين ثابتتين**
