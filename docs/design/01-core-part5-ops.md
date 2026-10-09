@@ -1,11 +1,11 @@
-## 14. قواعد الأمان الكاملة
+﻿## 14. قواعد الأمان الكاملة
 
 ### 14.1 عيب الأسبقية — ما هو بالضبط وكيف يُصلح
 
 قواعد Firestore **تُجمَع بـ OR لا بـ AND**. كل قاعدة `allow` تطابق مسار الطلب تُقيَّم، ويُمنح الوصول
-إن سمحت **أيُّ واحدة** منها. **لا توجد قاعدة مقيِّدة في Firestore**: القاعدة اللاحقة لا تضيّق قاعدة سابقة
-أوسع منها، والقاعدة الأعمق لا تتجاوز قاعدة أعلى منها. هذا يُنتج عيبين مختلفين، كلاهما كان حاضراً في
-المسوّدات السابقة، وكلاهما يُلغي الأمان بالكامل.
+إن سمحت **أيُّ واحدة** منها. **لا توجد «قاعدة مقيِّدة» في Firestore**: القاعدة اللاحقة لا تضيّق قاعدة
+سابقة أوسع منها، والقاعدة الأعمق لا تتجاوز قاعدة أعلى منها. هذا يُنتج عيبين مختلفين، كلاهما كان حاضراً
+في مسوّدات التقييم، وكلاهما يُلغي الأمان بالكامل.
 
 #### العيب الأول — منح عام بـ `{document=**}` يسبق قاعدة مقيِّدة
 
@@ -26,13 +26,12 @@ match /users/{uid}/journalEntries/{entryId} {
 #### العيب الثاني — أسبقية `&&` على `||` داخل شرط واحد
 
 ```javascript
-// ✗ خطأ قاتل — المسوّدة القديمة
+// ✗ خطأ قاتل
 allow create: if isOwner(uid)
               && request.resource.data.ownerUid == uid
               && entryId == request.resource.data.opId.split('__')[0] ||
                  entryId == request.resource.data.opId
-              && entryShapeOk(request.resource.data)
-              && !exists(/databases/$(database)/documents/users/$(uid)/periodLocks/$(pk));
+              && entryShapeOk(request.resource.data);
 ```
 
 `&&` تربط أقوى من `||`، فالشرط يُقرأ فعلياً:
@@ -40,27 +39,31 @@ allow create: if isOwner(uid)
 ```
 ( isOwner(uid) && ownerUid == uid && entryId == opId.split('__')[0] )
 ||
-( entryId == opId && entryShapeOk(d) && !exists(periodLock) )
+( entryId == opId && entryShapeOk(d) )
 ```
 
 **الفرع الثاني لا يفحص `isOwner` ولا `ownerUid` إطلاقاً.** أي شخص على الإنترنت، بأي حساب Google،
-يستطيع إنشاء قيود في دفتر المالك شرط أن يُسمّي المستند باسم `opId` ويمرّر فحص الشكل. هذا ينسف ق-2 نسفاً
-كاملاً، ولا يظهر في أي اختبار «هل يعمل التطبيق؟» لأن التطبيق يسلك دائماً الفرع الأول.
+يستطيع إنشاء قيود في دفتر المالك شرط أن يُسمّي المستند باسم `opId` ويمرّر فحص الشكل. هذا ينسف ق-2
+نسفاً كاملاً، ولا يظهر في أي اختبار «هل يعمل التطبيق؟» لأن التطبيق يسلك دائماً الفرع الأول.
 
 #### الإصلاح المعتمد — ثلاث قواعد بناء إلزامية
 
 1. **لا منح عام أبداً.** لا توجد في `firestore.rules` أي قاعدة `allow write` على `{document=**}`.
    كل مجموعة نواة تُعدّ صراحةً بقواعدها الخاصة، وما لم يُعدّ **مرفوض افتراضياً** (default deny).
 2. **كل شرط `allow` يبدأ بـ `isOwner(uid) &&` ثم `(` … `)`.** أي `||` داخل شرط يُغلَّف بأقواس صريحة
-   إلزامياً، ويُفحَص وجودها في مراجعة القواعد كبند قائمة تحقق.
-3. **قاعدة حرّاسة (sentinel) في نهاية الملف** تُطابق كل ما لم يُعدّ وتُرفض — قيمتها توثيقية وتشغيلية
-   (تُجبر أي مجموعة جديدة على المرور بمراجعة أمنية)، لا منطقية، لأن `false` لا يطرح من OR.
+   إلزامياً، ويُفحَص وجودها في اختبار نصّي على الملف نفسه (`20.3 / every allow condition starts with isOwner`).
+3. **كتلة حرّاسة في نهاية الملف** تُطابق كل ما لم يُعدّ وتُرفض — قيمتها توثيقية وتشغيلية (تُجبر أي
+   مجموعة جديدة على المرور بمراجعة أمنية)، لا منطقية، لأن `false` لا يطرح من OR.
 
 ### 14.2 `firestore.rules` — كامل وقابل للنشر
 
 > **ملاحظة تشغيل إلزامية (§25 بند 10):** لا يُنشر هذا الملف قبل اجتياز كل اختبارات القسم 20.3 على
-> `firebase emulators:exec`. UID المالك يُلتقط من أول تسجيل دخول ثم يُثبَّت في `OWNER_UIDS` ويُنشر.
+> `firebase emulators:exec`. UID المالك يُلتقط من أول تسجيل دخول ثم يُثبَّت في `approvedUids()` ويُنشر.
 > **البريد لا يُستخدم في القواعد مطلقاً** — ق-2: البريد يتغيّر، UID ثابت.
+>
+> أسماء الحقول والمستندات هنا هي **نفسها** الواردة في القسم 4 (الأنواع) والقسم 12 (الخوارزميات):
+> `postings/{entryId}:{lineNo}` بحقلَي `debitMinor`/`creditMinor` وبلا حقل دورة حياة ·
+> `accounts` **بلا `balanceMinor` مخزَّن** (الرصيد مشتقّ من الإجماليين) · البوابة `maintenance/rebuild`.
 
 ```javascript
 rules_version = '2';
@@ -76,7 +79,7 @@ service cloud.firestore {
     function approvedUids() {
       return [
         'REPLACE_WITH_OWNER_UID'      // محمد إبراهيم البرشي — albarshi.96@gmail.com
-        // ,'REPLACE_WITH_BACKUP_UID' // UID احتياطي (قرار مفتوح — القسم 22 بند م-3)
+        // ,'REPLACE_WITH_BACKUP_UID' // UID احتياطي (قرار مفتوح — 22.2 بند م-3)
       ];
     }
 
@@ -84,27 +87,20 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid != null;
     }
 
-    // المالك = موقَّع الدخول + UID معتمد + يكتب داخل نطاقه هو.
-    // الشروط الثلاثة مجتمعة: أحدها وحده لا يكفي.
+    // المالك = موقَّع الدخول + UID معتمد + يكتب داخل نطاقه هو. الشروط الثلاثة مجتمعة.
     function isOwner(uid) {
       return isSignedIn()
           && request.auth.uid == uid
           && request.auth.uid in approvedUids();
     }
 
-    // MAX_ABS_MINOR = 1_000_000_000_000 (القسم 2.1). موقَّع: الأرصدة قد تكون سالبة (ADR-010).
+    // MAX_ABS_MINOR = 1_000_000_000_000 (القسم 2.1). موقَّع: الحدود والفروق قد تكون سالبة (ADR-010).
     function isMoney(v) {
       return v is int && v >= -1000000000000 && v <= 1000000000000;
     }
 
-    // مبلغ سطر/دفعة: عدد صحيح موجب حصراً (الثابت I2).
-    function isPosMoney(v) {
-      return v is int && v > 0 && v <= 1000000000000;
-    }
-
-    function isNonNegMoney(v) {
-      return v is int && v >= 0 && v <= 1000000000000;
-    }
+    function isPosMoney(v) { return v is int && v >  0 && v <= 1000000000000; }
+    function isNonNeg(v)   { return v is int && v >= 0 && v <= 1000000000000; }
 
     // المفاتيح التي تغيّرت في هذا التحديث لا تخرج عن القائمة المسموحة.
     function hasOnly(keys) {
@@ -116,7 +112,7 @@ service cloud.firestore {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
     }
 
-    // بوابة مستند جديد: لا مفاتيح مجهولة، وكل المفاتيح الإلزامية حاضرة.
+    // بوابة شكل مستند جديد: كل المفاتيح الإلزامية حاضرة، ولا مفتاح مجهول.
     function shapeIs(required, optional) {
       return request.resource.data.keys().hasAll(required)
           && request.resource.data.keys().hasOnly(required.concat(optional));
@@ -136,21 +132,25 @@ service cloud.firestore {
           && request.resource.data.schemaVersion >= 1;
     }
 
-    // ADR-015: بوابة إعادة البناء. تُستدعى **بعد** فشل المسار الطبيعي فقط (|| يقصّر دائرته)،
-    // فلا تُحمَّل قراءة إضافية على كل عملية مالية عادية.
-    function rebuildActive(uid) {
-      return exists(/databases/$(database)/documents/users/$(uid)/rebuildJobs/active);
+    // ADR-015 — البوابة التي يسلّمها القسم 12: مستند واحد يحمل حالة الصيانة.
+    // بلا هذه البوابة، جهاز ثانٍ يسجّل مصروفاً في منتصف إعادة البناء فتُكتب القيم المطلقة
+    // فوق قيده ⇒ **يختفي مصروف بلا أي أثر**. تكلفتها: قراءة مفوترة واحدة لكل كتابة مالية،
+    // وتُقبل صراحةً (15.2) لأن البديل فقدان بيانات صامت.
+    function rebuildIdle(uid) {
+      return !exists(/databases/$(database)/documents/users/$(uid)/maintenance/rebuild)
+          || get(/databases/$(database)/documents/users/$(uid)/maintenance/rebuild)
+               .data.state != 'running';
     }
 
     // ══════════════════════════════════════════════════════════════════
     // 1) مستند المستخدم نفسه — لا يحمل مالاً، ولا ينشر صلاحيته لما تحته
     // ══════════════════════════════════════════════════════════════════
-    // هذه الكتلة تطابق مستند users/{uid} **وحده**. لا {document=**}، فلا انتشار.
+    // هذه الكتلة تطابق مستند users/{uid} **وحده**. لا {document=**} ⇒ لا انتشار (14.1).
     match /users/{uid} {
       allow get:    if isOwner(uid);
       allow create: if isOwner(uid) && request.resource.data.uid == uid;
       allow update: if isOwner(uid) && unchanged(['uid', 'createdAt']);
-      allow delete: if false;                         // لا حذف حساب من العميل
+      allow delete: if false;
 
       // ──────────────────────────────────────────────────────────────
       // 2) journalEntries — القيود. تُنشأ ولا تُمسّ محاسبياً ولا تُحذف.
@@ -162,54 +162,66 @@ service cloud.firestore {
         allow create: if isOwner(uid)
           && baseDocOk(uid)
           && (
-               // ADR-004: المعرّف = opId. منع الازدواج خصيصة في المفتاح لا منطق تطبيقي.
+               // ADR-004: المعرّف = opId. منع الازدواج خصيصة في المفتاح لا منطق تطبيقي (I23).
                entryId == request.resource.data.opId
             && request.resource.data.entryId == entryId
             && request.resource.data.payloadHash is string
-            && request.resource.data.payloadHash.size() == 64
-            && request.resource.data.currency == 'LYD'
-            && request.resource.data.status == 'posted'        // لا تُنشأ قيود بحالة أخرى
-            && request.resource.data.reversed == false         // قيد جديد غير معكوس بحكم التعريف
+            && request.resource.data.payloadHash.size() == 64              // SHA-256 hex (I24)
             && request.resource.data.kind is string
-            && periodMatchesDate(request.resource.data)        // ← ADR-008 مفروض من الخادم
+            && request.resource.data.reversed == false                     // قيد جديد غير معكوس
+            // قوسان صريحان إلزاماً (14.1 قاعدة 2): بلا القوسين يصبح الشرط فرعاً بلا isOwner.
+            && ( request.resource.data.kind == 'reversal'
+                   ? request.resource.data.reversalOf is string
+                   : request.resource.data.reversalOf == null )
+          )
+          && (
+               periodMatchesDate(request.resource.data)                    // ← ADR-008 / I13
             && request.resource.data.lines is list
-            && request.resource.data.lines.size() >= 2
+            && request.resource.data.lines.size() >= 2                     // ← I1 (جزء السطور)
             && request.resource.data.lines.size() <= 20
-            && request.resource.data.lineCount == request.resource.data.lines.size()
             && isPosMoney(request.resource.data.debitTotalMinor)
-            // ← الثابت I1 مفروض من الخادم: Σ Dr = Σ Cr
+            // ← I1 مفروض من الخادم: Σ Dr = Σ Cr
             && request.resource.data.debitTotalMinor == request.resource.data.creditTotalMinor
+            && isMoney(request.resource.data.creditTotalMinor)
             && request.resource.data.accountIds is list
             && request.resource.data.accountIds.size() >= 2
             && request.resource.data.accountIds.size() <= 20
+            && request.resource.data.accountTypes is list
+            && request.resource.data.scopes is list
             && request.resource.data.description is string
             && request.resource.data.description.size() > 0
-            && request.resource.data.description.size() <= 500
-            // ADR-010: لا أثر لـ allowNegative في المخطط. مستند يحمله = مستند من إصدار محظور.
-            && !request.resource.data.keys().hasAny(['allowNegative'])
-            // ADR-015: لا تُنشأ قيود أثناء إعادة البناء — تُغلق نافذة الكتابة المفقودة.
-            && !rebuildActive(uid)
+            && request.resource.data.description.size() <= 500             // §25 بند 18
+            && request.resource.data.bookedAt is string
+            // ADR-010: `allowNegative` محذوف من المخطط نهائياً. مستند يحمله = إصدار محظور.
+            && !request.resource.data.keys().hasAny(['allowNegative', 'balanceMinor'])
+            && rebuildIdle(uid)                                            // ← ADR-015 / I29
           );
 
-        // التعديل المسموح وحيد الاتجاه: وسم القيد معكوساً، ووصف/وسوم غير محاسبية.
+        // التعديل المسموح: وسم القيد معكوساً/مستبدَلاً، وحقول غير محاسبية فقط.
+        // `memo` هو الحقل الوحيد القابل للتعديل بلا قيد تصحيح (جدول القسم 8).
         allow update: if isOwner(uid)
           && hasOnly(['reversed', 'reversedByEntryId', 'replacedByEntryId',
-                      'correctionGroupId', 'description', 'tags', 'attachmentIds', 'updatedAt'])
-          && unchanged(['entryId', 'opId', 'payloadHash', 'kind', 'status', 'bookedAt',
-                        'periodKey', 'lines', 'lineCount', 'accountIds',
-                        'debitTotalMinor', 'creditTotalMinor', 'currency',
-                        'ownerUid', 'createdAt'])
-          // `reversed` بوابة أحادية: false → true فقط. لا «فكّ عكس».
+                      'memo', 'tags', 'attachments', 'updatedAt'])
+          && unchanged(['entryId', 'opId', 'payloadHash', 'kind', 'bookedAt', 'periodKey',
+                        'lines', 'accountIds', 'accountTypes', 'scopes',
+                        'debitTotalMinor', 'creditTotalMinor', 'reversalOf',
+                        'replacesEntryId', 'correctionReason', 'description',
+                        'ownerUid', 'createdAt', 'clientCreatedAt', 'deviceId'])
+          // `reversed` بوابة أحادية: false → true فقط. لا «فكّ عكس» (I17/I18).
           && (!request.resource.data.reversed || resource.data.reversed == false)
           && (resource.data.reversed == false || request.resource.data.reversed == true)
-          // قيد العكس نفسه لا يُعكَس (منعاً لسلاسل العكس اللانهائية)
-          && resource.data.kind != 'reversal';
+          // I18: قيد العكس نفسه لا يُعكَس ⇒ لا سلاسل عكس لانهائية
+          && resource.data.kind != 'reversal'
+          && rebuildIdle(uid);
 
-        allow delete: if false;                       // **لا حذف مالي مطلقاً**
+        allow delete: if false;                       // **لا حذف مالي مطلقاً** (I-NO-DELETE)
       }
 
       // ──────────────────────────────────────────────────────────────
-      // 3) postings — الإسقاط المسطَّح. المعرّف مشتق من القيد ⇒ idempotent.
+      // 3) postings — الإسقاط المسطَّح. **create فقط**: لا update ولا delete.
+      //    العكس يكتب صفوفاً معاكسة ⇒ كل مجموع صحيح بلا أي منطق استبعاد،
+      //    ولهذا لا يحمل الصفّ أي حقل دورة حياة (`reversed` / `status`).
+      //    المعرّف: `${entryId}:${lineNo}` — حتمي ⇒ إعادة المحاولة لا تُنشئ صفاً ثانياً.
       // ──────────────────────────────────────────────────────────────
       match /postings/{postingId} {
 
@@ -218,33 +230,41 @@ service cloud.firestore {
         allow create: if isOwner(uid)
           && baseDocOk(uid)
           && (
-               // postingId = `${entryId}__${lineIndex}` — إعادة المحاولة تكتب نفس المستند.
-               postingId.split('__')[0] == request.resource.data.entryId
-            && request.resource.data.lineIndex is int
-            && request.resource.data.lineIndex >= 0
-            && postingId == request.resource.data.entryId + '__' + string(request.resource.data.lineIndex)
+               postingId == request.resource.data.entryId + ':' + string(request.resource.data.lineNo)
+            && request.resource.data.lineNo is int
+            && request.resource.data.lineNo >= 1                           // 1-based (القسم 4)
+            && request.resource.data.entryId == request.resource.data.opId
             && request.resource.data.accountId is string
+            && request.resource.data.accountType is string
             && request.resource.data.side in ['debit', 'credit']
-            && isPosMoney(request.resource.data.amountMinor)
-            && periodMatchesDate(request.resource.data)
-            && request.resource.data.reversed == false
-            // ADR-021: الدلتا التشغيلية موقَّعة وقد تكون صفراً (قيد لا يسوّي شيئاً).
+            // حقلان لا حقل واحد: `sum('debitMinor')` يعمل بفهرس واحد بلا مرشّح جانب.
+            && isNonNeg(request.resource.data.debitMinor)
+            && isNonNeg(request.resource.data.creditMinor)
+            // أحدهما صفر دائماً والآخر موجب ⇒ لا صفّ بصفرين ولا صفّ بمبلغين (I2)
+            && (request.resource.data.debitMinor == 0)
+                 != (request.resource.data.creditMinor == 0)
+            && (request.resource.data.side == 'debit'
+                  ? request.resource.data.debitMinor  > 0
+                  : request.resource.data.creditMinor > 0)
+            && periodMatchesDate(request.resource.data)                    // ← I13
+            // ADR-021: الدلتا التشغيلية موقَّعة، وقد تكون صفراً (صفّ لا يسوّي شيئاً).
             && isMoney(request.resource.data.settlementDeltaMinor)
-            && !request.resource.data.keys().hasAny(['allowNegative'])
-            && !rebuildActive(uid)
+            // I8: دلتا ≠ 0 تحمل مرجعاً واحداً بالضبط من المرجعين التشغيليين
+            && (request.resource.data.settlementDeltaMinor == 0
+                || (request.resource.data.obligationId == null)
+                     != (request.resource.data.debtId == null))
+            && !request.resource.data.keys().hasAny(['allowNegative', 'reversed', 'status'])
+            && rebuildIdle(uid)
           );
 
-        allow update: if isOwner(uid)
-          && hasOnly(['reversed', 'reversedByEntryId', 'updatedAt'])
-          && unchanged(['entryId', 'lineIndex', 'accountId', 'side', 'amountMinor',
-                        'bookedAt', 'periodKey', 'settlementDeltaMinor', 'ownerUid'])
-          && (!request.resource.data.reversed || resource.data.reversed == false);
-
+        allow update: if false;                       // ← صفّ الترحيل غير قابل للتعديل (I30)
         allow delete: if false;
       }
 
       // ──────────────────────────────────────────────────────────────
-      // 4) accounts — المُجمَّع. الإجماليات تنامٍ محض، والرصيد متماسك معها.
+      // 4) accounts — المُجمَّع. **لا `balanceMinor` مخزَّن**: الرصيد مشتقّ من
+      //    `debitTotalMinor` و`creditTotalMinor` حسب `normalSide` (I4).
+      //    `normalSide` مخزَّن مع أنه مشتقّ من `type`، لأن لغة القواعد لا تستدعي دوال النطاق.
       // ──────────────────────────────────────────────────────────────
       match /accounts/{accountId} {
 
@@ -254,42 +274,58 @@ service cloud.firestore {
           && baseDocOk(uid)
           && (
                request.resource.data.type in ['asset', 'liability', 'equity', 'income', 'expense']
+            && request.resource.data.normalSide in ['debit', 'credit']
+            // I-COA-1: بادئة المعرّف الهرمي تساوي النوع دائماً
+            && accountId.split('\\.')[0] == request.resource.data.type
+            && request.resource.data.accountId == accountId
             && request.resource.data.currency == 'LYD'
-            && request.resource.data.code is string
             && request.resource.data.debitTotalMinor == 0
             && request.resource.data.creditTotalMinor == 0
-            && isMoney(request.resource.data.openingBalanceMinor)
-            && request.resource.data.balanceMinor == request.resource.data.openingBalanceMinor
+            && request.resource.data.entryCount == 0
             && request.resource.data.earmarkedMinor == 0
             // ADR-010: حدّ موقَّع، افتراضي 0. ولا وجود لـ allowNegative في المخطط.
             && isMoney(request.resource.data.minBalanceMinor)
-            && !request.resource.data.keys().hasAny(['allowNegative'])
+            && !request.resource.data.keys().hasAny(['allowNegative', 'balanceMinor',
+                                                     'openingBalanceMinor'])
+            // القاعدة 19.9 مفروضة من الخادم: المستحق لي ليس نقداً متاحاً
+            && (request.resource.data.accountId[0:17] != 'asset.receivable.'
+                || request.resource.data.isCashLike == false)
           );
 
         allow update: if isOwner(uid)
-          && unchanged(['type', 'code', 'currency', 'openingBalanceMinor', 'ownerUid', 'createdAt'])
-          && isMoney(request.resource.data.balanceMinor)
-          && isNonNegMoney(request.resource.data.debitTotalMinor)
-          && isNonNegMoney(request.resource.data.creditTotalMinor)
-          && isNonNegMoney(request.resource.data.earmarkedMinor)
+          && unchanged(['accountId', 'type', 'normalSide', 'parentId', 'depth', 'currency',
+                        'isPostable', 'isCashLike', 'isSystem', 'isArchivable', 'ownerUid',
+                        'createdAt'])
+          && !request.resource.data.keys().hasAny(['allowNegative', 'balanceMinor',
+                                                   'openingBalanceMinor'])
+          && isNonNeg(request.resource.data.debitTotalMinor)
+          && isNonNeg(request.resource.data.creditTotalMinor)
+          && isNonNeg(request.resource.data.earmarkedMinor)
           && isMoney(request.resource.data.minBalanceMinor)
-          // ثابت داخل المستند تفرضه القواعد فعلاً (I5): الرصيد = الافتتاحي ± الإجماليات
-          && request.resource.data.balanceMinor == (
-               request.resource.data.type in ['asset', 'expense']
-                 ? request.resource.data.openingBalanceMinor
-                   + request.resource.data.debitTotalMinor - request.resource.data.creditTotalMinor
-                 : request.resource.data.openingBalanceMinor
-                   + request.resource.data.creditTotalMinor - request.resource.data.debitTotalMinor
-             )
-          // حارس الرصيد (I21) — مفروض من الخادم لأن الطرفين في نفس المستند
-          && request.resource.data.balanceMinor >= request.resource.data.minBalanceMinor
+          && request.resource.data.entryCount is int
+          && request.resource.data.entryCount >= 0
           && (
-               // المسار الطبيعي: الإجماليات لا تنقص أبداً (حتى العكس يضيف سطراً مقابلاً)
-               (   request.resource.data.debitTotalMinor  >= resource.data.debitTotalMinor
-                && request.resource.data.creditTotalMinor >= resource.data.creditTotalMinor )
-               // ADR-015: مسار إعادة البناء بقيم مطلقة — مسموح بالنقصان ببوابة صريحة فقط.
-               // `||` تقصّر دائرتها ⇒ exists() لا يُستدعى في المسار الطبيعي ⇒ لا قراءة إضافية.
-            || rebuildActive(uid)
+               // ── المسار الطبيعي ──
+               (
+                    // الإجماليات لا تنقص أبداً: حتى العكس **يضيف** صفّاً مقابلاً (I4/I5)
+                    request.resource.data.debitTotalMinor  >= resource.data.debitTotalMinor
+                 && request.resource.data.creditTotalMinor >= resource.data.creditTotalMinor
+                 && request.resource.data.entryCount       >= resource.data.entryCount
+                    // ← I15/I21: حارس الرصيد مفروض من الخادم، لأن طرفَي المقارنة في نفس المستند.
+                    //   الرصيد الموقَّع = الإجمالي على الجانب الطبيعي ناقص الجانب المقابل.
+                 && (request.resource.data.normalSide == 'debit'
+                       ? request.resource.data.debitTotalMinor - request.resource.data.creditTotalMinor
+                       : request.resource.data.creditTotalMinor - request.resource.data.debitTotalMinor)
+                    >= request.resource.data.minBalanceMinor
+                 && rebuildIdle(uid)
+               )
+               // ── ADR-015: مسار إعادة البناء بقيم مطلقة — النقصان مسموح ببوابة صريحة فقط ──
+               //   `||` تقصّر دائرتها ⇒ get() الثانية لا تُستدعى إلا إذا فشل المسار الطبيعي.
+            || (
+                    exists(/databases/$(database)/documents/users/$(uid)/maintenance/rebuild)
+                 && get(/databases/$(database)/documents/users/$(uid)/maintenance/rebuild)
+                      .data.state == 'running'
+               )
           );
 
         allow delete: if false;                       // الأرشفة بـ status لا الحذف
@@ -298,52 +334,72 @@ service cloud.firestore {
       // ──────────────────────────────────────────────────────────────
       // 5) accountPeriods — حركة فقط (ADR-009). لا رصيد بداية ولا نهاية.
       //    المعرّف: `${accountId}__${periodKey}`
+      //    قائمة المفاتيح البيضاء هي **الآلية التي تمنع عودة العيب القاتل**: أي مستند
+      //    يحمل openingBalanceMinor أو closingBalanceMinor أو balanceMinor يُرفض من الخادم.
       // ──────────────────────────────────────────────────────────────
       match /accountPeriods/{apId} {
 
         allow get, list: if isOwner(uid);
 
-        // قائمة المفاتيح البيضاء هي **الآلية التي تمنع عودة العيب القاتل**:
-        // أي مستند يحمل openingBalanceMinor أو closingBalanceMinor يُرفض من الخادم.
         allow create: if isOwner(uid)
           && baseDocOk(uid)
-          && shapeIs(['ownerUid', 'schemaVersion', 'accountId', 'periodKey',
-                      'debitMinor', 'creditMinor', 'entryCount'],
+          && shapeIs(['id', 'ownerUid', 'schemaVersion', 'accountId', 'accountType',
+                      'periodKey', 'debitMinor', 'creditMinor', 'entryCount'],
                      ['updatedAt', 'createdAt'])
           && apId == request.resource.data.accountId + '__' + request.resource.data.periodKey
+          && request.resource.data.id == apId
           && isPeriodKey(request.resource.data.periodKey)
-          && isNonNegMoney(request.resource.data.debitMinor)
-          && isNonNegMoney(request.resource.data.creditMinor)
+          && isNonNeg(request.resource.data.debitMinor)
+          && isNonNeg(request.resource.data.creditMinor)
           && request.resource.data.entryCount is int
           && request.resource.data.entryCount >= 0;
 
         allow update: if isOwner(uid)
           && hasOnly(['debitMinor', 'creditMinor', 'entryCount', 'updatedAt'])
-          && isNonNegMoney(request.resource.data.debitMinor)
-          && isNonNegMoney(request.resource.data.creditMinor)
+          && isNonNeg(request.resource.data.debitMinor)
+          && isNonNeg(request.resource.data.creditMinor)
           && (
                (   request.resource.data.debitMinor  >= resource.data.debitMinor
-                && request.resource.data.creditMinor >= resource.data.creditMinor )
-            || rebuildActive(uid)
+                && request.resource.data.creditMinor >= resource.data.creditMinor
+                && request.resource.data.entryCount  >= resource.data.entryCount
+                && rebuildIdle(uid) )
+            || (   exists(/databases/$(database)/documents/users/$(uid)/maintenance/rebuild)
+                && get(/databases/$(database)/documents/users/$(uid)/maintenance/rebuild)
+                     .data.state == 'running' )
           );
 
-        allow delete: if isOwner(uid) && rebuildActive(uid);   // تنظيف فترة شاذة أثناء البناء فقط
+        // تنظيف مستند فترة شاذ أثناء إعادة البناء فقط (16.5.2 / 2.2)
+        allow delete: if isOwner(uid)
+          && exists(/databases/$(database)/documents/users/$(uid)/maintenance/rebuild)
+          && get(/databases/$(database)/documents/users/$(uid)/maintenance/rebuild)
+               .data.state == 'running';
       }
 
       // ──────────────────────────────────────────────────────────────
-      // 6) entryCorrections/{originalEntryId} — قفل تصحيح. مرة واحدة إلى الأبد (ADR-014).
+      // 6) entryCorrections/{originalEntryId} — قفل التصحيح (ADR-014).
+      //    يُنشأ مرة واحدة، ويُحدَّث بإلحاق على السلسلة فقط. لا حذف ولا إعادة فتح.
       // ──────────────────────────────────────────────────────────────
       match /entryCorrections/{originalEntryId} {
         allow get, list: if isOwner(uid);
+
         allow create: if isOwner(uid)
           && baseDocOk(uid)
-          && shapeIs(['ownerUid', 'schemaVersion', 'originalEntryId', 'reversalEntryId',
-                      'replacementEntryId', 'correctionGroupId', 'reason', 'at'],
-                     [])
           && request.resource.data.originalEntryId == originalEntryId
-          && request.resource.data.reason is string
-          && request.resource.data.reason.size() > 0;
-        allow update, delete: if false;               // القفل لا يُفتح ولا يُحدَّث
+          && request.resource.data.chain is list
+          && request.resource.data.chainLength is int
+          && request.resource.data.chainLength == request.resource.data.chain.size()
+          && request.resource.data.correctionReason is string
+          && request.resource.data.correctionReason.size() > 0;
+
+        // إلحاق فقط: السلسلة تطول ولا تقصر، و`voided` بوابة أحادية.
+        allow update: if isOwner(uid)
+          && hasOnly(['chain', 'chainLength', 'currentEntryId', 'voided', 'updatedAt'])
+          && unchanged(['originalEntryId', 'ownerUid', 'createdAt'])
+          && request.resource.data.chainLength > resource.data.chainLength
+          && request.resource.data.chainLength == request.resource.data.chain.size()
+          && (!resource.data.voided || request.resource.data.voided == true);
+
+        allow delete: if false;
       }
 
       // ──────────────────────────────────────────────────────────────
@@ -359,31 +415,34 @@ service cloud.firestore {
           && request.resource.data.extraChargesMinor == 0
           && request.resource.data.paidMinor == 0
           && request.resource.data.remainingMinor == request.resource.data.totalMinor
-          // ADR-011: قسط القرض ليس مصروفاً — الطبيعة إلزامية عند الإنشاء ولا افتراضي لها.
+          // ADR-011: الطبيعة إلزامية عند الإنشاء ولا افتراضي لها، و`financing` لا فئة مصروف له.
           && request.resource.data.nature in ['expense', 'financing']
+          && (request.resource.data.nature != 'financing'
+              || request.resource.data.categoryId == null)
           && isDate(request.resource.data.dueDate);
 
         allow update: if isOwner(uid)
-          // ADR-012: totalMinor **لا يُرفع أبداً**. الزيادة تذهب إلى extraChargesMinor.
-          && unchanged(['totalMinor', 'nature', 'ownerUid', 'createdAt'])
-          && isNonNegMoney(request.resource.data.extraChargesMinor)
-          && isNonNegMoney(request.resource.data.paidMinor)
-          // منع السداد الزائد (I17) — مفروض من الخادم
+          // ADR-012 / I10: totalMinor **لا يُرفع أبداً**. الزيادة تذهب إلى extraChargesMinor.
+          && unchanged(['obligationId', 'nature', 'totalMinor', 'accrualEnabled',
+                        'liabilityAccountId', 'isVariableAmount', 'ownerUid', 'createdAt'])
+          && isNonNeg(request.resource.data.extraChargesMinor)
+          && isNonNeg(request.resource.data.paidMinor)
+          // I9: منع السداد الزائد — مفروض من الخادم
           && request.resource.data.paidMinor <=
              request.resource.data.totalMinor + request.resource.data.extraChargesMinor
+          // I5: المتبقي مشتقّ مخزَّن ⇒ معادلته مفروضة لا مُفترضة
           && request.resource.data.remainingMinor ==
              request.resource.data.totalMinor + request.resource.data.extraChargesMinor
              - request.resource.data.paidMinor
-          // paidMinor لا ينقص إلا بإلغاء دفعة (عكس) — والعكس يمرّ من نفس المسار بدلتا سالبة،
-          // فلا نفرض التنامي هنا؛ نفرض السقف والمعادلة فقط.
           && request.resource.data.status in
-             ['upcoming', 'due', 'overdue', 'partiallyPaid', 'paid', 'cancelled'];
+             ['upcoming', 'due', 'overdue', 'partiallyPaid', 'paid', 'cancelled']
+          && rebuildIdle(uid);
 
         allow delete: if false;
       }
 
       // ──────────────────────────────────────────────────────────────
-      // 8) debts
+      // 8) debts — نموذج موحَّد بـ direction (القسمان 9 و10)
       // ──────────────────────────────────────────────────────────────
       match /debts/{debtId} {
         allow get, list: if isOwner(uid);
@@ -393,15 +452,20 @@ service cloud.firestore {
           && isPosMoney(request.resource.data.principalMinor)
           && request.resource.data.settledMinor == 0
           && request.resource.data.remainingMinor == request.resource.data.principalMinor
-          && request.resource.data.direction in ['payable', 'receivable'];
+          && request.resource.data.direction in ['payable', 'receivable']
+          // ثابت نوعي لا إعداد: السداد/التحصيل الزائد ممنوع دائماً
+          && request.resource.data.allowOverSettle == false;
 
         allow update: if isOwner(uid)
-          && unchanged(['principalMinor', 'direction', 'ownerUid', 'createdAt'])
-          && isNonNegMoney(request.resource.data.settledMinor)
-          && request.resource.data.settledMinor <= request.resource.data.principalMinor
+          && unchanged(['debtId', 'direction', 'principalMinor', 'accountId', 'createdCash',
+                        'counterpartyContactId', 'allowOverSettle', 'ownerUid', 'createdAt'])
+          && isNonNeg(request.resource.data.settledMinor)
+          && request.resource.data.settledMinor <= request.resource.data.principalMinor   // I9
           && request.resource.data.remainingMinor ==
-             request.resource.data.principalMinor - request.resource.data.settledMinor
-          && !request.resource.data.keys().hasAny(['allowOverSettle']);
+             request.resource.data.principalMinor - request.resource.data.settledMinor    // I6
+          && request.resource.data.status in
+             ['open', 'partiallySettled', 'settled', 'writtenOff', 'cancelled']
+          && rebuildIdle(uid);
 
         allow delete: if false;
       }
@@ -413,8 +477,8 @@ service cloud.firestore {
         allow get, list: if isOwner(uid);
         allow create, update: if isOwner(uid)
           && baseDocOk(uid)
-          && isNonNegMoney(request.resource.data.limitMinor)
-          && isNonNegMoney(request.resource.data.spentMinor)
+          && isNonNeg(request.resource.data.limitMinor)
+          && isNonNeg(request.resource.data.spentMinor)
           && isPeriodKey(request.resource.data.periodKey);
         allow delete: if isOwner(uid);                // الميزانية ليست قيداً مالياً
       }
@@ -424,44 +488,45 @@ service cloud.firestore {
         allow create, update: if isOwner(uid)
           && baseDocOk(uid)
           && isPosMoney(request.resource.data.targetMinor)
-          && isNonNegMoney(request.resource.data.savedMinor)
-          && isNonNegMoney(request.resource.data.earmarkedMinor);
+          && isNonNeg(request.resource.data.savedMinor)
+          && isNonNeg(request.resource.data.earmarkedMinor);
         allow delete: if isOwner(uid);
       }
 
       // ──────────────────────────────────────────────────────────────
-      // 10) pendingCommands — طابور محلي (ADR-007). ليس دفتراً ⇒ الحذف مسموح.
+      // 10) pendingCommands/{opId} — طابور محلي (ADR-007). ليس دفتراً ⇒ الحذف مسموح،
+      //     لأن **النجاح هو الحذف** (القسم 12): القيد كُتب والأمر خرج من الطابور.
       // ──────────────────────────────────────────────────────────────
       match /pendingCommands/{opId} {
         allow get, list: if isOwner(uid);
         allow create: if isOwner(uid)
           && baseDocOk(uid)
           && opId == request.resource.data.opId
-          && request.resource.data.status in ['queued', 'inflight', 'failed']
-          && request.resource.data.payloadHash is string;
+          && request.resource.data.payloadHash is string
+          && request.resource.data.status in ['queued', 'inflight', 'failed'];
         allow update: if isOwner(uid)
           && unchanged(['opId', 'payloadHash', 'ownerUid', 'createdAt'])
           && request.resource.data.status in ['queued', 'inflight', 'failed'];
-        allow delete: if isOwner(uid);                // يُحذف عند نجاح الترحيل
+        allow delete: if isOwner(uid);
       }
 
       // ──────────────────────────────────────────────────────────────
-      // 11) rebuildJobs — بوابة ADR-015. `active` معرّف محجوز.
+      // 11) maintenance/{taskId} — بوابة ADR-015 ومؤشر الاستئناف.
+      //     `rebuild` معرّف محجوز: وجوده بحالة 'running' يُقفل كل كتابة مالية.
       // ──────────────────────────────────────────────────────────────
-      match /rebuildJobs/{jobId} {
+      match /maintenance/{taskId} {
         allow get, list: if isOwner(uid);
-        allow create: if isOwner(uid)
+        allow create, update: if isOwner(uid)
           && baseDocOk(uid)
-          && shapeIs(['ownerUid', 'schemaVersion', 'jobId', 'scope', 'startedAt',
-                      'cursorPostingId', 'processedCount', 'phase'], ['note'])
-          && request.resource.data.phase in ['scanning', 'applying'];
-        allow update: if isOwner(uid)
-          && hasOnly(['cursorPostingId', 'processedCount', 'phase', 'note']);
-        allow delete: if isOwner(uid);                // الحذف = إغلاق البوابة وإنهاء الإجراء
+          && request.resource.data.taskId == taskId
+          && request.resource.data.state in ['idle', 'running', 'verifying', 'done', 'failed']
+          && request.resource.data.runToken is string;
+        allow delete: if isOwner(uid);                // إنهاء الإجراء وفتح الكتابة
       }
 
       // ──────────────────────────────────────────────────────────────
-      // 12) auditLogs — إلحاق فقط. لا تحديث ولا حذف، للمالك أيضاً.
+      // 12) auditLogs/{opId} — إلحاق فقط. لا تحديث ولا حذف، **للمالك أيضاً**.
+      //     المعرّف حتمي = opId ⇒ إعادة المحاولة لا تُنتج سجلين (القسم 12).
       // ──────────────────────────────────────────────────────────────
       match /auditLogs/{logId} {
         allow get, list: if isOwner(uid);
@@ -474,18 +539,23 @@ service cloud.firestore {
       }
 
       // ──────────────────────────────────────────────────────────────
-      // 13) settings — إعدادات عرض، لا مال
+      // 13) settings — إعدادات عرض + `lockedPeriods` (I25).
+      //     القفل يُضاف ولا يُرفع من العميل: `lockedPeriods` تطول ولا تقصر.
       // ──────────────────────────────────────────────────────────────
       match /settings/{docId} {
         allow get, list: if isOwner(uid);
-        allow create, update: if isOwner(uid) && baseDocOk(uid);
+        allow create: if isOwner(uid) && baseDocOk(uid);
+        allow update: if isOwner(uid)
+          && baseDocOk(uid)
+          && (!('lockedPeriods' in resource.data)
+              || request.resource.data.lockedPeriods.hasAll(resource.data.lockedPeriods));
         allow delete: if false;
       }
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // 14) حرّاسة نهائية — توثيقية وتشغيلية (14.1 قاعدة 3)
-    // أي مسار لم يُعدّ أعلاه مرفوض افتراضياً. هذه الكتلة تجعل الرفض **مقصوداً ومرئياً**،
+    // 14) كتلة حرّاسة نهائية — توثيقية وتشغيلية (14.1 قاعدة 3).
+    // أي مسار لم يُعدّ أعلاه مرفوض افتراضياً. هذه الكتلة تجعل الرفض **مقصوداً ومرئياً**
     // وتُجبر أي مجموعة جديدة على المرور بمراجعة أمنية قبل أن تعمل.
     // ══════════════════════════════════════════════════════════════════
     match /{document=**} {
@@ -497,50 +567,56 @@ service cloud.firestore {
 
 ### 14.3 ما تفرضه القواعد فعلاً
 
-| # | الثابت المفروض من الخادم | موضع الفرض |
-|---|---|---|
-| 1 | الإغلاق على UIDs معتمدة (ق-2) | `isOwner()` في كل شرط |
-| 2 | `debitTotalMinor === creditTotalMinor` لكل قيد (I1) | `journalEntries` create |
-| 3 | `lines.size() >= 2` وكل مبلغ صحيح موجب (I2) | `journalEntries` + `postings` create |
-| 4 | `periodKey === bookedAt[0:7]` (ADR-008، I7) | `periodMatchesDate()` على القيود والـ postings |
-| 5 | `entryId === opId` (ADR-004، I10) | `journalEntries` create |
-| 6 | `postingId === entryId__lineIndex` (I24 جزئياً) | `postings` create |
-| 7 | `balanceMinor` متماسك مع الإجماليات والافتتاحي (I5) | `accounts` update — تعبير شرطي على `type` |
-| 8 | `balanceMinor >= minBalanceMinor` (I21) | `accounts` update |
-| 9 | الإجماليات لا تنقص خارج إعادة البناء | `accounts` + `accountPeriods` update |
-| 10 | `accountPeriods` لا تحمل رصيد بداية/نهاية (ADR-009، I8) | قائمة مفاتيح بيضاء في `shapeIs()` |
-| 11 | `obligation.totalMinor` لا يتغيّر أبداً (ADR-012، I18) | `obligations` update `unchanged()` |
-| 12 | منع السداد الزائد على الالتزام والدين (I17، I19) | `obligations` + `debts` update |
-| 13 | `nature` إلزامية ولا تتغيّر (ADR-011) | `obligations` |
-| 14 | لا حذف مالي ولا تعديل محاسبي ولا كتابة على `auditLogs` (I12، I13) | `allow delete: if false` + `hasOnly()` |
-| 15 | `reversed` بوابة أحادية `false → true` | `journalEntries` + `postings` update |
-| 16 | قفل التصحيح يُنشأ مرة واحدة (ADR-014، I16) | `entryCorrections` create-only |
-| 17 | اختفاء `allowNegative` و`allowOverSettle` من المخطط (ADR-010) | `hasAny()` نافية |
-| 18 | لا كتابة مالية أثناء إعادة البناء | `!rebuildActive(uid)` على create |
+| # | الثابت المفروض من الخادم | موضع الفرض | الثابت |
+|---|---|---|---|
+| 1 | الإغلاق على UIDs معتمدة (ق-2) | `isOwner()` في كل شرط | — |
+| 2 | `debitTotalMinor === creditTotalMinor` لكل قيد | `journalEntries` create | **I1** |
+| 3 | `lines.size() >= 2`، وكل صفّ ترحيل بمبلغ واحد موجب صحيح | `journalEntries` + `postings` create | **I1، I2، I21، I22** |
+| 4 | `periodKey === bookedAt[0:7]` على القيد والترحيل | `periodMatchesDate()` | **I13** |
+| 5 | `entryId === opId` و`payloadHash` بطول 64 | `journalEntries` create | **I23، I24** |
+| 6 | `postingId === entryId:lineNo` | `postings` create | **I11** |
+| 7 | دلتا تسوية ≠ 0 تحمل مرجعاً تشغيلياً **واحداً بالضبط** | `postings` create | **I8** |
+| 8 | الرصيد المشتقّ `≥ minBalanceMinor` حسب `normalSide` | `accounts` update | **I15، I21** |
+| 9 | الإجماليات و`entryCount` لا تنقص خارج إعادة البناء | `accounts` + `accountPeriods` update | **I4، I5، I12** |
+| 10 | `accountPeriods` لا تحمل رصيد بداية/نهاية/جارياً | قائمة مفاتيح بيضاء | **ADR-009** |
+| 11 | `obligation.totalMinor` لا يتغيّر أبداً | `obligations` update | **I10** |
+| 12 | منع السداد/التحصيل الزائد، ومعادلة المتبقي | `obligations` + `debts` update | **I5، I6، I9** |
+| 13 | `nature` إلزامية ولا تتغيّر، و`financing` بلا فئة مصروف | `obligations` | **ADR-011** |
+| 14 | `allowOverSettle === false` إلزامي على كل دين | `debts` | **I9** |
+| 15 | لا حذف مالي، ولا تعديل محاسبي، و`postings` create-only | `allow delete: if false` + `hasOnly()` | **I30** |
+| 16 | `reversed` و`voided` بوابتان أحاديتان، ولا عكس لقيد عكس | `journalEntries` + `entryCorrections` update | **I17، I18** |
+| 17 | قفل التصحيح إلحاقي: `chainLength` يطول ولا يقصر | `entryCorrections` | **I26** |
+| 18 | لا كتابة مالية أثناء إعادة البناء | `rebuildIdle()` على كل create/update مالي | **I29** |
+| 19 | `lockedPeriods` تطول ولا تقصر | `settings` update | **I25** (جزئياً) |
+| 20 | اختفاء `allowNegative` و`balanceMinor` و`openingBalanceMinor` من المخطط | `hasAny()` نافية | **ADR-009، ADR-010** |
+| 21 | `isCashLike === false` على حسابات المستحق لي | `accounts` create | القاعدة 19.9 |
+| 22 | بادئة `accountId` تساوي `type` | `accounts` create | **I-COA-1** |
 
 ### 14.4 ما **لا** تستطيع القواعد فرضه — وما البديل (ADR-020)
 
 لغة القواعد تُقيّم **كل مستند على حدة**، بلا حلقات، وبلا رؤية لبقية مستندات نفس الـ batch
-(عدا `getAfter()` — بند 14.5). النتيجة سبعة ثقوب معلنة:
+(عدا `getAfter()` — بند 14.5). النتيجة ثمانية ثقوب معلنة:
 
 | # | ما لا تستطيعه القاعدة | لماذا | البديل المعتمد (ADR-020) |
 |---|---|---|---|
-| 1 | **ميزان المراجعة عبر الحسابات**: `Σ debitTotalMinor = Σ creditTotalMinor` على ~45 مستند حساب | ثابت عبر مستندات متعددة؛ القاعدة ترى مستنداً واحداً | فاحص `ledgerFingerprint()` بـ `getAggregateFromServer` (16.2) + الثابت I4 كاختبار |
-| 2 | **صحة المُجمَّعات**: أن تكون زيادة `account.debitTotalMinor` مساوية لمجموع سطور القيد المدينة على ذلك الحساب | يتطلب قراءة `lines` والمرور عليها — لا حلقات في اللغة | مسار كتابة وحيد (`postOperation`) + اختبار جدولي لكل نوع عملية (20.2) + `reconcileAccount` (16.1) |
-| 3 | **اكتمال الـ batch**: batch يكتب القيد ويُغفل تحديث `accountPeriods` **يُقبَل بالكامل** | كل كتابة تُقيَّم مستقلة | ذرّية `runTransaction` (الطبقة `data` هي الكاتب الوحيد) + `reconcileAccount` يكشف الانحراف لاحقاً |
-| 4 | **تطابق `postings` مع `lines`** | مقارنة عبر مستندات + حلقة | `lineCount` على القيد + فاحص `orphanScan` (16.3) على الثابت I24 |
-| 5 | **اتجاه القيد محاسبياً** (مدين/دائن معكوسان) | معكوس الاتجاه **متوازن تماماً**؛ لا ثابت رياضي يكشفه | اختبار جدولي لكل سطر في جدول القسم 9 — الحماية **اختبارية لا بنيوية**. قصور معلن (18 بند 6) |
-| 6 | **صحة الدلتا التشغيلية**: أن تكون زيادة `obligation.paidMinor` = مبلغ الدفعة في القيد | ثابت عبر مستندين | ADR-021: `Σ settlementDeltaMinor` على `postings` مصدر **مستقل** يُقارَن بـ `paidMinor` في `reconcileObligations` (16.4) |
-| 7 | **أن القيد ليس يتيماً**: قيد بلا `postings` | القاعدة لا ترى الكتابات الأخرى | `postings` مسطَّحة في نفس المعاملة + `orphanScan` |
+| 1 | **ميزان المراجعة عبر الحسابات** (I2): `Σ debitTotalMinor = Σ creditTotalMinor` على ~45 مستند | ثابت عبر مستندات متعددة؛ القاعدة ترى مستنداً واحداً | بصمة الدفتر بـ `getAggregateFromServer` (16.2) + اختبار `integration/trial-balance` |
+| 2 | **صحة المُجمَّعات** (I5، I12): أن تكون زيادة `account.debitTotalMinor` مساوية لمجموع سطور القيد المدينة على ذلك الحساب | يتطلب المرور على `lines` — **لا حلقات في اللغة** | مسار كتابة وحيد (`postOperation`) + اختبار جدولي لكل عملية (20.2) + `reconcileAccount` (16.1) |
+| 3 | **اكتمال الـ batch**: batch يكتب القيد ويُغفل `accountPeriods` **يُقبَل بالكامل** | كل كتابة تُقيَّم مستقلة | ذرّية `runTransaction` في مسار الكتابة الوحيد + `reconcileAccount` يكشف الانحراف لاحقاً |
+| 4 | **تطابق `postings` مع `lines`** (I11) | مقارنة عبر مستندات + حلقة | معرّف حتمي `entryId:lineNo` + فاحص `orphanScan` (16.3) |
+| 5 | **اتجاه القيد محاسبياً** (مدين/دائن معكوسان) | معكوس الاتجاه **متوازن تماماً** ⇒ لا ثابت رياضي يكشفه | اختبار جدولي لكل سطر في جدول القسم 9. الحماية **اختبارية لا بنيوية**. قصور معلن (18.1 بند 6) |
+| 6 | **صحة الدلتا التشغيلية** (I6، I7): أن تكون زيادة `paidMinor` = مبلغ الدفعة في القيد | ثابت عبر مستندين | ADR-021: `Σ settlementDeltaMinor` مصدر **مستقل** يُقارَن في `reconcileObligation` (16.4) |
+| 7 | **صافي الترحيلات صفر** (I3) ومجموع الفترات = حركة الحساب (I12) | تجميع عبر مجموعة كاملة | `getAggregateFromServer` في الفاحص اليومي (16.2) |
+| 8 | **الفترة المُقفلة** (I25) بالكامل | القاعدة تمنع **تقصير** `lockedPeriods`، ولا تقرأ القائمة لتمنع قيداً داخلها إلا بـ `get()` إضافية على `settings` | الحارس G9 في النطاق + الفحص المسبق. إضافة `get()` ثانية لكل قيد خيار مفتوح (22.2 بند م-4) |
 
 **الخلاصة المعلنة للمالك:** القواعد على Spark تحمي **شكل كل مستند وثوابته الداخلية** وتمنع الحذف
-والتعديل المحاسبي والوصول غير المصرَّح. **الثوابت العرضية بين المستندات محمية بمسار كتابة وحيد
-واختبارات وفاحص دوري، لا بالخادم.** الفرض الخادمي الحقيقي يحتاج Cloud Functions ⇒ **Blaze** (القسم 18 بند 1).
+والتعديل المحاسبي والوصول غير المصرَّح، **وتُقفل الكتابة أثناء الصيانة**. أما **الثوابت العرضية بين
+المستندات** فمحميّة بمسار كتابة وحيد واختبارات وفاحص دوري، **لا بالخادم**. الفرض الخادمي الحقيقي
+يحتاج Cloud Functions ⇒ **Blaze** (18.1 بند 1).
 
 ### 14.5 ADR-022 — `getAfter()` — **مقترح غير معتمد**
 
-**الفكرة:** إلزام أن كل تحديث لرصيد حساب يكون مصحوباً بقيد في **نفس** الـ transaction/batch.
-`getAfter()` تقرأ حالة المستند **بعد** الـ commit المقترح، فتستطيع رؤية مستند القيد الذي يُكتب معها.
+**الفكرة:** إلزام أن كل تحديث لمُجمَّعات حساب يكون مصحوباً بقيد في **نفس** الـ transaction/batch.
+`getAfter()` تقرأ حالة المستند **بعد** الـ commit المقترح، فترى مستند القيد الذي يُكتب معها.
 
 ```javascript
 // مقترح — لا يُضاف إلى firestore.rules قبل الإثبات في المحاكي
@@ -548,48 +624,48 @@ match /accounts/{accountId} {
   allow update: if isOwner(uid)
     && /* … كل شروط 14.2 … */
     && (
-         // كل تحديث رصيد يحمل معرّف القيد المصاحب
-         getAfter(/databases/$(database)/documents/users/$(uid)/journalEntries/$(request.resource.data.lastEntryId))
+         getAfter(/databases/$(database)/documents/users/$(uid)/journalEntries/$(request.resource.data.lastPostedEntryId))
            .data.ownerUid == uid
-      && getAfter(/databases/$(database)/documents/users/$(uid)/journalEntries/$(request.resource.data.lastEntryId))
-           .data.accountIds.hasAny([accountId])     // القيد يمسّ هذا الحساب فعلاً
-      || rebuildActive(uid)
+      && getAfter(/databases/$(database)/documents/users/$(uid)/journalEntries/$(request.resource.data.lastPostedEntryId))
+           .data.accountIds.hasAny([accountId])      // القيد يمسّ هذا الحساب فعلاً
+      || /* فرع إعادة البناء */ false
     );
 }
 ```
 
-يتطلب حقلاً جديداً على الحساب: `lastEntryId: string`.
+الحقل المطلوب موجود أصلاً في القسم 4: **`accounts.lastPostedEntryId`** ⇒ المقترح لا يضيف حقلاً.
 
-**ما يُضيفه فعلاً:** يُغلق الثقب رقم 3 جزئياً — لم يبقَ ممكناً تحديث رصيد **بلا قيد** ولا بقيد
-**لا يمسّ هذا الحساب**. لا يُغلق الثقب رقم 2 (قيمة الزيادة) ولا رقم 5 (الاتجاه).
+**ما يُضيفه فعلاً:** يُغلق الثقب رقم 3 جزئياً — لم يبقَ ممكناً تحديث مُجمَّع **بلا قيد** ولا بقيد
+**لا يمسّ هذا الحساب**. لا يُغلق الثقب 2 (قيمة الزيادة) ولا 5 (الاتجاه).
 
 **مخاطره وتكلفته — سبب عدم الاعتماد قبل الإثبات:**
 
-1. **حدّ استدعاءات الوصول:** 10 لكل طلب مستند واحد، **20 لكل transaction/batch**. مصروف واحد يكتب
-   8 مستندات؛ لو حمل كل تحديث حساب وفترة `getAfter` واحداً = 4 استدعاءات → داخل الحد. تعديل
-   (عكس + بديل، 12–16 مستنداً) قد يبلغ 8 استدعاءات → ما زال داخل الحد لكن الهامش يضيق.
-   **عملية تقسيم مصروف على 6 فئات قد تتجاوز 20 فجأةً** فتفشل العملية بـ `PERMISSION_DENIED` غامض.
-2. **التكلفة:** كل `getAfter` قراءة محسوبة. +2 إلى +4 قراءات لكل عملية. بـ 15 عملية/يوم = 60 قراءة
+1. **حدّ استدعاءات الوصول:** 10 لكل طلب مستند واحد، **20 لكل transaction/batch**، وبوابة
+   `rebuildIdle()` تستهلك منها أصلاً واحداً لكل كتابة. مصروف يكتب ~8 مستندات؛ مع `getAfter` على
+   الحسابات والفترات = 4 استدعاءات إضافية ⇒ داخل الحد. **تعديل** (12–16 مستنداً) قد يبلغ 8، و**مصروف
+   مقسَّم على 6 فئات** قد يتجاوز 20 فجأةً فتفشل العملية بـ `PERMISSION_DENIED` غامض.
+2. **التكلفة:** كل `getAfter` قراءة مفوترة. +2 إلى +4 لكل عملية ⇒ بـ 15 عملية/يوم = 60 قراءة
    = 0.12% من الحصة ⇒ **التكلفة ليست العقبة**.
-3. **الهشاشة:** يربط صحة الكتابة بحقل `lastEntryId` يكتبه العميل. عميل خاطئ يكتب `lastEntryId` لقيد
-   قديم يمسّ نفس الحساب ⇒ **يمرّ**. أي أن الحماية أضعف ممّا تبدو.
-4. **تعطيل إعادة البناء:** إعادة البناء تحدّث الحسابات بلا قيد مصاحب ⇒ تحتاج فرع `rebuildActive` —
-   وهو ما يفتح بوابة واسعة أثناء البناء. مقايضة صريحة.
+3. **الهشاشة:** يربط صحة الكتابة بحقل `lastPostedEntryId` يكتبه العميل. عميل مُعطوب يضع فيه معرّف
+   قيد **قديم** يمسّ نفس الحساب ⇒ **يمرّ**. أي أن الحماية أضعف ممّا تبدو.
+4. **تعطيل إعادة البناء:** إعادة البناء تحدّث المُجمَّعات بلا قيد مصاحب ⇒ تحتاج فرع استثناء، وهو ما
+   يفتح بوابة واسعة أثناء الصيانة. مقايضة صريحة.
 
-**كيف يُثبَت في المحاكي قبل الاعتماد** (ملف `tests/rules/getafter.proposal.test.ts`، لا يُنشر معه الإنتاج):
+**كيف يُثبَت في المحاكي قبل الاعتماد** (`tests/rules/getafter.proposal.test.ts`، لا يُنشر معه الإنتاج):
 
 | الاختبار | المتوقع |
 |---|---|
 | `accounts.update` منفرد بلا قيد في نفس الـ batch | `PERMISSION_DENIED` |
-| `batch { accounts.update + journalEntries.create }` و`lastEntryId` يطابق القيد | **يُقبل** |
+| `batch { accounts.update + journalEntries.create }` و`lastPostedEntryId` يطابق القيد | **يُقبل** |
 | نفس الـ batch لكن `accountIds` في القيد لا تحتوي `accountId` | `PERMISSION_DENIED` |
-| كتابتان منفصلتان (قيد أولاً ثم الحساب في طلب ثانٍ) | `PERMISSION_DENIED` ← **هذا هو بيت القصيد** |
-| `batch` يمسّ 7 حسابات (14 `getAfter`) + 7 فترات | قياس: هل يُرفض بـ `resource exhausted`؟ **إن رُفض ⇒ المقترح مرفوض** |
-| إعادة بناء بوجود `rebuildJobs/active` | **يُقبل** بلا `lastEntryId` صحيح |
-| قياس القراءات المحسوبة في 100 عملية | ≤ 400 قراءة إضافية |
+| كتابتان منفصلتان (القيد في طلب ثم الحساب في طلب ثانٍ) | `PERMISSION_DENIED` ← **بيت القصيد** |
+| `batch` يمسّ 6 حسابات و6 فترات (12 `getAfter` + 12 `rebuildIdle`) | قياس: هل يُرفض بـ `resource exhausted`؟ **إن رُفض ⇒ المقترح مرفوض** |
+| إعادة بناء بحالة `maintenance/rebuild.state === 'running'` | **يُقبل** بلا `lastPostedEntryId` صحيح |
+| قياس القراءات المفوترة في 100 عملية | ≤ 400 قراءة إضافية |
 
 **قرار البوابة:** يُعتمد ADR-022 **فقط** إن نجحت الصفوف الستة الأولى **و** لم يفشل صف الحد الأقصى.
-إن فشل صف الحد ⇒ يُرفض نهائياً ويُسجَّل سبب الرفض في `docs/adr/ADR-022-*.md`.
+إن فشل صف الحد ⇒ **يُرفض نهائياً** ويُسجَّل سبب الرفض في `docs/adr/ADR-022-*.md`.
+
 
 ---
 
@@ -605,161 +681,187 @@ match /accounts/{accountId} {
 | التخزين | 1 GiB |
 | النطاق الصادر | 10 GiB/شهر |
 
-**قواعد الفوترة التي تحكم كل الأرقام أدناه:**
-- كل مستند يُعاد من استعلام = قراءة واحدة. **الاستعلام الفارغ = قراءة واحدة** (الحد الأدنى).
-- `count()` / `sum()` / `average()` عبر `getAggregateFromServer` = **قراءة واحدة لكل 1,000 مدخلة فهرس
-  ممسوحة**، بحد أدنى 1. هذا سبب ADR-016: بصمة الدفتر على 13,000 posting = **14 قراءة لا 13,000**.
-- القراءة من الذاكرة المؤقتة المحلية (`source: 'cache'`) **غير محسوبة**. المستمع (`onSnapshot`)
-  يُحسب مرة لكل مستند في اللقطة الأولى، ثم لكل مستند **متغيّر** فقط.
-- كل مستند يُكتب = كتابة واحدة. الـ transaction لا تُخفّض العدد.
+**قواعد الفوترة التي تحكم كل الأرقام أدناه — خمس قواعد، كل رقم في هذا القسم مشتقّ منها:**
+
+1. كل مستند يُعاد من استعلام = قراءة واحدة. **الاستعلام الفارغ = قراءة واحدة** (الحد الأدنى).
+2. `count()` / `sum()` / `average()` عبر `getAggregateFromServer` = **قراءة واحدة لكل 1,000 مدخلة
+   فهرس ممسوحة**، بحد أدنى 1. هذا سبب ADR-016: بصمة الدفتر على 14,000 ترحيل = **14 قراءة لا 14,000**.
+3. **كل `exists()` و`get()` و`getAfter()` داخل القواعد = قراءة مفوترة.** بوابة `rebuildIdle()`
+   تكلّف **قراءة واحدة لكل كتابة مالية** — تُحتسب صريحاً في 15.2 ولا تُخفى.
+4. القراءة من الذاكرة المؤقتة المحلية **غير مفوترة**. المستمع `onSnapshot` يُحسب مرة لكل مستند في
+   اللقطة الأولى، ثم لكل مستند **متغيّر** فقط.
+5. كل مستند يُكتب = كتابة واحدة. الـ `runTransaction` و`writeBatch` **لا يُخفّضان العدد**.
 
 ### 15.2 القراءات/الكتابات لكل عملية
 
-الأرقام أدناه لشجرة حسابات نموذجية: **45 حساباً**، منها ~8 نقدية و~12 مصروف/دخل ورقية.
+لشجرة حسابات نموذجية: **~45 حساباً**، منها ~8 نقدية و~12 ورقة مصروف/دخل.
+«ق.قواعد» = القراءات التي تستهلكها بوابة `rebuildIdle()` في القواعد.
 
-| العملية | القراءات داخل المعاملة | الكتابات | التفصيل |
-|---|---|---|---|
-| **مصروف نقدي بسيط** | **6** | **8** | قراءة: `journalEntries/{opId}` (فحص الازدواج) 1 + `accounts` 2 + `accountPeriods` 2 + `rebuildJobs/active` (من القاعدة) 1 — كتابة: `journalEntries` 1 + `postings` 2 + `accounts` 2 + `accountPeriods` 2 + `auditLogs` 1 |
-| **دخل مستلم** | 6 | 8 | مطابق للمصروف |
-| **تحويل بين حسابين** | 6 | 8 | الطرفان `asset` ⇒ لا حساب دخل/مصروف أصلاً |
-| **دفع التزام** | **7** | **9** | +`obligations/{id}` قراءةً وكتابةً |
-| **دفع التزام `financing`** | 7 | 9 | نفس العدد، أطراف مختلفة (ADR-011) |
-| **تحصيل دين** | 7 | 9 | +`debts/{id}` |
-| **مصروف مقسَّم على 3 فئات** | 8 | **12** | 4 سطور ⇒ `postings` 4 + `accounts` 4 + `accountPeriods` 4 |
-| **تعديل (عكس + بديل)** | **12** | **16** | قيدان + 4 postings جديدة + وسم 2 postings أصلية + وسم القيد الأصلي + `accounts` 2 + `accountPeriods` 2 + `entryCorrections` 1 + `auditLogs` 1 |
-| **إلغاء (عكس فقط)** | 9 | 11 | قيد عكس + 2 postings + وسم الأصل + `accounts` 2 + `accountPeriods` 2 + `entryCorrections` 1 + `auditLogs` 1 |
-| **إعادة الضغط على الزر (نفس `opId`)** | **1** | **0** | `journalEntries/{opId}` موجود ⇒ `alreadyApplied` ⇒ خروج فوري |
-| **ترحيل أمر معلّق من `pendingCommands`** | 6 | 9 | +حذف مستند الطابور (حذف لا كتابة) |
+| العملية | ق. المعاملة | ق. القواعد | **الكتابات** | تفصيل الكتابات |
+|---|---|---|---|---|
+| **مصروف نقدي بسيط** | 5 | **1** | **8** | `journalEntries` 1 + `postings` 2 + `accounts` 2 + `accountPeriods` 2 + `auditLogs` 1 |
+| **دخل مستلم** | 5 | 1 | 8 | مطابق |
+| **تحويل بين حسابين** | 5 | 1 | 8 | الطرفان `asset` ⇒ لا حساب دخل/مصروف في القيد أصلاً |
+| **دفع التزام `expense`** | 6 | 1 | **9** | +`obligations` 1 |
+| **دفع التزام `financing`** | 6 | 1 | 9 | نفس العدد، أطراف مختلفة (ADR-011) |
+| **تحصيل/سداد دين** | 6 | 1 | 9 | +`debts` 1 |
+| **مصروف مقسَّم على 3 فئات** | 7 | 1 | **12** | 4 سطور ⇒ `postings` 4 + `accounts` 4 + `accountPeriods` 4 |
+| **إلغاء (عكس)** | 8 | 1 | **11** | قيد عكس 1 + `postings` 2 معاكسة + وسم الأصل 1 + `accounts` 2 + `accountPeriods` 2 + `entryCorrections` 1 + `auditLogs` 1. **لا تعديل على `postings` الأصلية** — العكس يكتب صفوفاً جديدة |
+| **تعديل (عكس + بديل)** | 10 | 1 | **16** | قيدان + 4 `postings` + وسم الأصل + `accounts` 2 + `accountPeriods` 2 + `entryCorrections` 1 + `auditLogs` 1 |
+| **رصيد افتتاحي لحساب** | 5 | 1 | 8 | قيد `opening` مقابل `equity.opening` |
+| **إعادة الضغط على الزر (نفس `opId`)** | **1** | 0 | **0** | `journalEntries/{opId}` موجود ⇒ `alreadyApplied` ⇒ خروج فوري بلا كتابة |
+| **ترحيل أمر من `pendingCommands`** | 5 | 1 | 8 + حذف 1 | النجاح = حذف مستند الطابور |
+
+**ملاحظة على بوابة القواعد:** القراءة الواحدة تُحتسب مرة لكل **طلب** لا مرة لكل مستند، لأن Firestore
+يُخزّن نتيجة `get()` على نفس المسار داخل تقييم الطلب الواحد. المعاملة الواحدة = طلب واحد ⇒ **+1 لا +8**.
 
 ### 15.3 القراءات لكل فتح لوحة تحكم
 
-| البطاقة/الرسم | المصدر | قراءات (باردة) | قراءات (ساخنة، مع الذاكرة المؤقتة) |
+| البطاقة/الرسم | المصدر | باردة | ساخنة (مع الذاكرة المؤقتة) |
 |---|---|---|---|
-| إجمالي الأموال المتاحة + شاشة الحسابات | استعلام `accounts` حيث `status == 'active'` | **8** | 0–2 (المتغيّر فقط) |
-| الدخل/المصروف/الصافي لهذا الشهر | `accountPeriods` حيث `periodKey == pk` | **20** | 0–4 |
-| الالتزامات القادمة والمتأخرة | `obligations` حيث `status in [...]` مرتَّباً بـ `dueDate` بحد 10 | **10** | 0–1 |
-| الديون عليّ / لي | `debts` حيث `direction` + `status` بحد 10 لكل اتجاه | **20** | 0–1 |
+| إجمالي الأموال المتاحة + شاشة الحسابات | `accounts` حيث `isCashLike == true` و`status == 'active'` | **8** | 0–2 (المتغيّر فقط) |
+| الدخل/المصروف/الصافي لهذا الشهر | `accountPeriods` حيث `periodKey == pk` و`accountType in ['income','expense']` | **20** | 0–4 |
+| الالتزامات القادمة والمتأخرة | `obligations` حيث `status in [...]` مرتَّباً بـ `dueDate`، حد 10 | **10** | 0–1 |
+| الديون عليّ / لي | `debts` حيث `direction` + `status`، حد 10 لكل اتجاه | **20** | 0–1 |
 | نسبة استهلاك الميزانية | `budgets` حيث `periodKey == pk` | **6** | 0–1 |
 | الأهداف المالية | `financialGoals` حيث `status == 'active'` | **5** | 0–1 |
 | عمليات معلّقة (ADR-007) | `pendingCommands` حيث `status != 'done'` | **1** (فارغ عادةً) | 1 |
-| **المجموع الأساسي** | | **70** | **2–10** |
-| رسم «اتجاهات الإنفاق 12 شهراً» | `accountPeriods` حيث `accountId in [12 حساب مصروف/دخل]` و`periodKey >= pk-11` | **+144** | 0 بعد أول تحميل |
-| **المجموع مع الرسم السنوي** | | **214** | **2–10** |
+| حالة الصيانة | `maintenance/rebuild` | **1** | 1 |
+| **المجموع الأساسي** | | **71** | **3–11** |
+| رسم «اتجاهات الإنفاق 12 شهراً» | `accountPeriods` حيث `accountType == 'expense'` و`periodKey >= pk-11` | **+144** | 0 بعد أول تحميل |
+| **المجموع مع الرسم السنوي** | | **215** | **3–11** |
 
 **الاستهلاك الواقعي اليومي لمستخدم واحد:**
 
 | السلوك | الحساب | النتيجة | % من الحصة |
 |---|---|---|---|
-| 15 عملية مالية/يوم | 15 × (6 قراءة + 8.5 كتابة) | 90 قراءة + 128 كتابة | **0.18%** قراءة · **0.64%** كتابة |
-| 20 فتحة لوحة تحكم (أول واحدة باردة) | 214 + 19 × 8 | 366 قراءة | **0.73%** |
-| كشف حركة حساب 3 صفحات × 25 | 75 | 75 قراءة | 0.15% |
-| تقرير شهري | `postings` حيث `periodKey == pk` و`!reversed` ≈ 400 posting | 400 قراءة | 0.80% |
-| **إجمالي يوم كثيف** | | **~930 قراءة · ~130 كتابة** | **1.9%** · **0.65%** |
+| 15 عملية مالية/يوم | 15 × (5.6 ق. معاملة + 1 ق. قواعد + 8.7 كتابة) | **99 قراءة · 131 كتابة** | 0.20% · 0.66% |
+| 20 فتحة لوحة تحكم (الأولى باردة) | 215 + 19 × 9 | **386 قراءة** | 0.77% |
+| كشف حركة حساب 3 صفحات × 25 | على `postings` بترقيم | **75 قراءة** | 0.15% |
+| الفحص اليومي `runLedgerHealthCheck` | 3 تجميعات + استعلام `accounts` | **~90 قراءة** | 0.18% |
+| تقرير شهري | `postings` حيث `periodKey == pk` ≈ 400 صفّ | **400 قراءة** | 0.80% |
+| **إجمالي يوم كثيف** | | **~1,050 قراءة · ~132 كتابة** | **2.1% · 0.66%** |
 
-**الهامش: ~53 ضعفاً في القراءة و~150 ضعفاً في الكتابة.** التكلفة الكمّية **ليست قيداً**.
+**الهامش: ~47 ضعفاً في القراءة و~150 ضعفاً في الكتابة.** التكلفة الكمّية **ليست قيداً**.
 القيد الحقيقي على Spark هو **غياب Cloud Functions وStorage** (القسم 18)، لا الحصة.
 
 ### 15.4 متى نقترب من الحصة **واقعياً** — أربعة سيناريوهات فقط
 
-| السيناريو | الحساب | الحصة المستهلكة | الحكم والعلاج |
+| السيناريو | الحساب | الحصة | الحكم والعلاج |
 |---|---|---|---|
-| **1. إعادة بناء إسقاطات كاملة** بعد 3 سنوات (~6,000 قيد، ~14,000 posting) | مسح 14,000 posting + كتابة 45 حساب + ~1,600 `accountPeriods` | **14,000 قراءة (28%)** + 1,645 كتابة (8%) | **سيناريو حقيقي.** ثلاث عمليات بناء في يوم واحد = 84% ⇒ العلاج: مؤشر استئناف (16.5) + **منع أكثر من بناءين يومياً** بفحص `rebuildJobs` السابقة |
-| **2. تصدير JSON كامل** (ق-1، النسخة الاحتياطية الوحيدة) | قراءة كل مستند: 6,000 + 14,000 + 45 + 1,600 + 200 ≈ **21,850 قراءة (44%)** | 44% | **سيناريو حقيقي وشهري.** العلاج: تصدير **تزايدي** بـ `where bookedAt > lastExportAt` ⇒ أقل من 500 قراءة شهرياً بعد النسخة الأولى. النسخة الكاملة مرة واحدة سنوياً |
-| **3. تقرير «كل الأوقات» بلا حد** | مسح `postings` كاملاً | 14,000 قراءة (28%) | **منع معماري:** كل استعلام تقرير **ملزَم بـ `periodKey` أو نطاق `bookedAt`**، ومجال «كل الأوقات» يُخدَم من `accountPeriods` المُجمَّعة (1,600 مستند) لا من `postings`. تُفرَض هذه القاعدة في مراجعة الكود للطبقة `data` |
-| **4. استعلام بلا فهرس مركَّب** | Firestore يرفضه بـ `FAILED_PRECONDITION` ولا يهدر حصة | 0 | **ليس خطر تكلفة بل خطر إيقاف.** العلاج: كل استعلام في `data` له فهرس في 15.5، واختبار محاكي يمرّ على كل استعلام (20.2) |
+| **1. إعادة بناء إسقاطات كاملة** بعد 3 سنوات (~6,000 قيد، ~14,000 ترحيل) | مسح 14,000 ترحيل + كتابة 45 حساب + ~1,620 `accountPeriods` + مستند مؤشر لكل صفحة (~47) | **14,000 قراءة (28%)** + ~1,712 كتابة (8.6%) | **سيناريو حقيقي.** ثلاث عمليات في يوم = 84% ⇒ العلاج: مؤشر استئناف + **منع أكثر من بناءين يومياً** بفحص `maintenance/rebuild.startedAt` |
+| **2. تصدير JSON كامل** (ق-1، النسخة الاحتياطية الوحيدة) | 6,000 + 14,000 + 45 + 1,620 + ~200 ≈ **21,900 قراءة (44%)** | 44% | **سيناريو حقيقي وشهري.** العلاج: تصدير **تزايدي** بـ `where createdAt > lastExportAt` ⇒ أقل من 500 قراءة شهرياً بعد النسخة الأولى. الكامل مرة سنوياً (22.2 بند م-9) |
+| **3. تقرير «كل الأوقات» بلا حد** | مسح `postings` كاملاً | 14,000 (28%) | **منع معماري:** كل استعلام تقرير **ملزَم بـ `periodKey` أو نطاق `bookedAt`**، ومجال «كل الأوقات» يُخدَم من `accountPeriods` المُجمَّعة (1,620 مستنداً) لا من `postings`. تُفرَض القاعدة في مراجعة الطبقة `data` ويحرسها `integration/query-index-coverage` |
+| **4. استعلام بلا فهرس مركَّب** | Firestore يرفضه بـ `FAILED_PRECONDITION` ولا يهدر حصة | 0 | **ليس خطر تكلفة بل خطر إيقاف.** العلاج: كل استعلام في `data` له فهرس في 15.6، واختبار محاكي يمرّ على كل استعلام (20.2) |
 
-**الاستهلاك غير الواقعي (يُستبعد صريحاً):** 2,850 عملية مالية يومياً (= سقف الكتابة) يعني 118 عملية
-في الساعة بلا توقف. 233 فتحة لوحة تحكم باردة يومياً. **لا سيناريو شخصي يقاربهما.**
+**الاستهلاك غير الواقعي (يُستبعد صريحاً):** 2,300 عملية مالية يومياً (= سقف الكتابة ÷ 8.7) يعني 96
+عملية في الساعة بلا توقف. 232 فتحة لوحة تحكم باردة يومياً. **لا سيناريو شخصي يقاربهما.**
 
 ### 15.5 التخزين والنمو
 
 | الكيان | حجم المستند المقدَّر | العدد بعد 3 سنوات | الحجم |
 |---|---|---|---|
-| `journalEntries` (سطور مضمَّنة) | ~1.2 KB | 6,000 | 7.2 MB |
+| `journalEntries` (سطور مضمَّنة، ~2.3 سطر/قيد) | ~1.2 KB | 6,000 | 7.2 MB |
 | `postings` | ~0.45 KB | 14,000 | 6.3 MB |
 | `accountPeriods` | ~0.2 KB | 1,620 | 0.3 MB |
 | `auditLogs` | ~0.4 KB | 6,500 | 2.6 MB |
-| الباقي (`accounts`, `obligations`, `debts`, `budgets`, `financialGoals`) | — | ~400 | 0.3 MB |
+| الباقي (`accounts`, `obligations`, `debts`, `budgets`, `financialGoals`, `settings`) | — | ~400 | 0.3 MB |
 | **البيانات** | | | **~17 MB** |
 | **الفهارس** (≈ 2.5× بعد الاستثناءات في 15.6) | | | **~43 MB** |
 | **الإجمالي** | | | **~60 MB من 1 GiB = 6%** |
 
-بلا استثناءات الفهرسة في 15.6، فهرسة `lines` (مصفوفة خرائط) وحدها تضاعف الحجم وتزيد تكلفة الكتابة
-الزمنية؛ **الاستثناءات ليست تحسيناً اختيارياً.**
+بلا استثناءات الفهرسة في 15.6، فهرسة `lines` (مصفوفة خرائط بـ 11 حقلاً لكل سطر) وحدها تضاعف الحجم
+وتُبطئ كل كتابة قيد. **الاستثناءات ليست تحسيناً اختيارياً.**
 
 ### 15.6 `firestore.indexes.json`
+
+> **ملاحظتان بنيويتان تُفسّران غياب مرشّح `reversed` من كل فهارس `postings`:**
+> (1) صفّ الترحيل **لا يحمل حقل دورة حياة**؛ العكس يكتب صفوفاً معاكسة ⇒ كل مجموع يُصفِّر نفسه
+> رياضياً بلا أي منطق استبعاد. (2) المبلغ في حقلين (`debitMinor` / `creditMinor`) لا في حقل واحد
+> مع `side` ⇒ `sum('debitMinor')` يعمل بفهرس واحد بلا مرشّح جانب.
 
 ```jsonc
 {
   "indexes": [
-    // ── postings: الإسقاط المسطَّح — هو مصدر كل تجميع وكل كشف ──
+    // ── postings: الإسقاط المسطَّح — مصدر كل تجميع وكل كشف ──
 
-    // كشف حركة حساب (القسم 5): where accountId == X && reversed == false order by bookedAt desc
+    // كشف حركة حساب (القسم 5): where accountId == X order by bookedAt desc
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "accountId", "order": "ASCENDING" },
-      { "fieldPath": "reversed",  "order": "ASCENDING" },
       { "fieldPath": "bookedAt",  "order": "DESCENDING" } ] },
 
-    // reconcileAccount + sum(amountMinor) لكل جانب (16.1)
+    // reconcileAccount (16.1): sum('debitMinor') و sum('creditMinor') لحساب واحد
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "accountId",   "order": "ASCENDING" },
-      { "fieldPath": "reversed",    "order": "ASCENDING" },
-      { "fieldPath": "side",        "order": "ASCENDING" },
-      { "fieldPath": "amountMinor", "order": "ASCENDING" } ] },
+      { "fieldPath": "debitMinor",  "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "accountId",   "order": "ASCENDING" },
+      { "fieldPath": "creditMinor", "order": "ASCENDING" } ] },
 
-    // إعادة بناء accountPeriods: where periodKey == pk && reversed == false
+    // إعادة بناء accountPeriods (16.5): فترة واحدة، مرتَّبة بالمعرّف لمؤشر الاستئناف
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "periodKey", "order": "ASCENDING" },
-      { "fieldPath": "reversed",  "order": "ASCENDING" },
       { "fieldPath": "accountId", "order": "ASCENDING" },
-      { "fieldPath": "side",      "order": "ASCENDING" } ] },
+      { "fieldPath": "__name__",  "order": "ASCENDING" } ] },
 
-    // تقرير الفئة الشهري
+    // تقرير الدخل/المصروف الشهري بلا انضمام (accountType على الصفّ)
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "periodKey",   "order": "ASCENDING" },
+      { "fieldPath": "accountType", "order": "ASCENDING" },
+      { "fieldPath": "debitMinor",  "order": "ASCENDING" } ] },
+
+    // استهلاك الميزانية بـ sum() خادمي (categoryId على الصفّ)
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "periodKey",  "order": "ASCENDING" },
       { "fieldPath": "categoryId", "order": "ASCENDING" },
-      { "fieldPath": "reversed",   "order": "ASCENDING" },
-      { "fieldPath": "bookedAt",   "order": "DESCENDING" } ] },
+      { "fieldPath": "debitMinor", "order": "ASCENDING" } ] },
 
     // مصاريف المنزل (§11): نفس المصروفات بعدسة scope — لا تكرار قيمة
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "scope",     "order": "ASCENDING" },
       { "fieldPath": "periodKey", "order": "ASCENDING" },
-      { "fieldPath": "reversed",  "order": "ASCENDING" },
       { "fieldPath": "bookedAt",  "order": "DESCENDING" } ] },
+
+    // «حجم التحويلات» و«المقترض» و«المسدَّد» بمجموع واحد (kind على الصفّ)
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "kind",       "order": "ASCENDING" },
+      { "fieldPath": "periodKey",  "order": "ASCENDING" },
+      { "fieldPath": "debitMinor", "order": "ASCENDING" } ] },
 
     // ADR-005: سجل دفعات الالتزام = استعلام على الدفتر، لا مجموعة موازية
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
-      { "fieldPath": "refs.obligationId", "order": "ASCENDING" },
-      { "fieldPath": "reversed",          "order": "ASCENDING" },
-      { "fieldPath": "bookedAt",          "order": "DESCENDING" } ] },
+      { "fieldPath": "obligationId", "order": "ASCENDING" },
+      { "fieldPath": "bookedAt",     "order": "DESCENDING" } ] },
 
-    // ADR-021: Σ settlementDeltaMinor للالتزام — المصدر المستقل لصحة paidMinor
+    // ADR-021 / I6: Σ settlementDeltaMinor للالتزام — المصدر المستقل لصحة paidMinor
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
-      { "fieldPath": "refs.obligationId",      "order": "ASCENDING" },
-      { "fieldPath": "reversed",               "order": "ASCENDING" },
-      { "fieldPath": "settlementDeltaMinor",   "order": "ASCENDING" } ] },
-
-    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
-      { "fieldPath": "refs.debtId",          "order": "ASCENDING" },
-      { "fieldPath": "reversed",             "order": "ASCENDING" },
+      { "fieldPath": "obligationId",         "order": "ASCENDING" },
       { "fieldPath": "settlementDeltaMinor", "order": "ASCENDING" } ] },
 
-    // بصمة الدفتر (ADR-016): sum(amountMinor) حيث reversed == false لكل جانب
+    // ADR-021 / I7: نفسه للدين
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
-      { "fieldPath": "reversed",    "order": "ASCENDING" },
-      { "fieldPath": "side",        "order": "ASCENDING" },
-      { "fieldPath": "amountMinor", "order": "ASCENDING" } ] },
+      { "fieldPath": "debtId",               "order": "ASCENDING" },
+      { "fieldPath": "settlementDeltaMinor", "order": "ASCENDING" } ] },
 
-    // مؤشر استئناف إعادة البناء (ADR-015): ترتيب كلي مستقر لا يتغيّر بإدخال قيد بتاريخ ماضٍ
+    // «صافي مركزي مع فلان» (القسم 10): استعلام واحد لا استعلامان
     { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
-      { "fieldPath": "entryId",   "order": "ASCENDING" },
-      { "fieldPath": "lineIndex", "order": "ASCENDING" } ] },
+      { "fieldPath": "contactId", "order": "ASCENDING" },
+      { "fieldPath": "bookedAt",  "order": "DESCENDING" } ] },
+
+    // تقدّم الهدف المالي
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "goalId",     "order": "ASCENDING" },
+      { "fieldPath": "bookedAt",   "order": "DESCENDING" } ] },
+
+    // بصمة الدفتر (ADR-016 / I2، I3): sum على كل المجموعة لكل جانب
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "debitMinor",  "order": "ASCENDING" } ] },
+    { "collectionGroup": "postings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "creditMinor", "order": "ASCENDING" } ] },
 
     // ── journalEntries ──
     { "collectionGroup": "journalEntries", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "periodKey", "order": "ASCENDING" },
-      { "fieldPath": "reversed",  "order": "ASCENDING" },
       { "fieldPath": "bookedAt",  "order": "DESCENDING" } ] },
 
     { "collectionGroup": "journalEntries", "queryScope": "COLLECTION", "fields": [
@@ -767,20 +869,47 @@ match /accounts/{accountId} {
       { "fieldPath": "reversed", "order": "ASCENDING" },
       { "fieldPath": "bookedAt", "order": "DESCENDING" } ] },
 
-    // التصدير التزايدي (15.4 سيناريو 2)
+    // كشف حركة حساب على مستوى القيد (array-contains على accountIds) + ترتيب
+    { "collectionGroup": "journalEntries", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "accountIds", "arrayConfig": "CONTAINS" },
+      { "fieldPath": "bookedAt",   "order": "DESCENDING" } ] },
+
+    // قائمة عمليات المنزل (3.8)
+    { "collectionGroup": "journalEntries", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "scopes",   "arrayConfig": "CONTAINS" },
+      { "fieldPath": "bookedAt", "order": "DESCENDING" } ] },
+
+    // التصدير التزايدي (15.4 سيناريو 2) — ترتيب كلي مستقر
     { "collectionGroup": "journalEntries", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "createdAt", "order": "ASCENDING" },
       { "fieldPath": "__name__",  "order": "ASCENDING" } ] },
 
     // ── accountPeriods: ADR-009 — الحركة فقط ──
+    // لوحة التحكم: حركة كل حسابات المصروف لهذه الفترة بلا انضمام
     { "collectionGroup": "accountPeriods", "queryScope": "COLLECTION", "fields": [
-      { "fieldPath": "periodKey", "order": "ASCENDING" },
-      { "fieldPath": "accountId", "order": "ASCENDING" } ] },
+      { "fieldPath": "periodKey",   "order": "ASCENDING" },
+      { "fieldPath": "accountType", "order": "ASCENDING" } ] },
 
-    // الرصيد التراكمي المشتق: كل فترات حساب واحد مرتَّبة (ADR-009)
+    // الرصيد التراكمي المشتقّ: كل فترات حساب واحد مرتَّبة (ADR-009 / I12)
     { "collectionGroup": "accountPeriods", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "accountId", "order": "ASCENDING" },
       { "fieldPath": "periodKey", "order": "ASCENDING" } ] },
+
+    // رسم «12 شهراً» (15.3)
+    { "collectionGroup": "accountPeriods", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "accountType", "order": "ASCENDING" },
+      { "fieldPath": "periodKey",   "order": "ASCENDING" } ] },
+
+    // ── accounts ──
+    { "collectionGroup": "accounts", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "isCashLike", "order": "ASCENDING" },
+      { "fieldPath": "status",     "order": "ASCENDING" },
+      { "fieldPath": "sortOrder",  "order": "ASCENDING" } ] },
+
+    { "collectionGroup": "accounts", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "type",      "order": "ASCENDING" },
+      { "fieldPath": "status",    "order": "ASCENDING" },
+      { "fieldPath": "sortOrder", "order": "ASCENDING" } ] },
 
     // ── obligations / debts ──
     { "collectionGroup": "obligations", "queryScope": "COLLECTION", "fields": [
@@ -794,9 +923,13 @@ match /accounts/{accountId} {
       { "fieldPath": "dueDate", "order": "ASCENDING" } ] },
 
     { "collectionGroup": "debts", "queryScope": "COLLECTION", "fields": [
-      { "fieldPath": "direction", "order": "ASCENDING" },
-      { "fieldPath": "status",    "order": "ASCENDING" },
-      { "fieldPath": "dueDate",   "order": "ASCENDING" } ] },
+      { "fieldPath": "direction",       "order": "ASCENDING" },
+      { "fieldPath": "status",          "order": "ASCENDING" },
+      { "fieldPath": "expectedSettleAt","order": "ASCENDING" } ] },
+
+    { "collectionGroup": "debts", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "counterpartyContactId", "order": "ASCENDING" },
+      { "fieldPath": "status",                "order": "ASCENDING" } ] },
 
     // ── auditLogs / pendingCommands ──
     { "collectionGroup": "auditLogs", "queryScope": "COLLECTION", "fields": [
@@ -809,31 +942,44 @@ match /accounts/{accountId} {
   ],
 
   "fieldOverrides": [
-    // `lines` مصفوفة خرائط مضمَّنة: فهرستها الأحادية تُنتج مدخلة لكل حقل في كل سطر
-    // ⇒ تضخّم الفهارس وتُبطئ كل كتابة قيد. لا يُستعلم عنها بـ where أبداً (الاستعلام على postings).
-    { "collectionGroup": "journalEntries", "fieldPath": "lines",
-      "indexes": [] },
+    // `lines` مصفوفة خرائط مضمَّنة بـ 11 حقلاً لكل سطر: فهرستها الأحادية تُنتج مدخلة لكل
+    // حقل في كل سطر ⇒ تضخّم الفهارس وتُبطئ كل كتابة قيد. **ولا يُستعلم عنها بـ where أبداً**،
+    // لأن كل استعلام مستوى-سطر يذهب إلى `postings` (وهو سبب وجودها).
+    { "collectionGroup": "journalEntries", "fieldPath": "lines",       "indexes": [] },
+    { "collectionGroup": "journalEntries", "fieldPath": "description", "indexes": [] },
+    { "collectionGroup": "journalEntries", "fieldPath": "memo",        "indexes": [] },
+    { "collectionGroup": "journalEntries", "fieldPath": "payloadHash", "indexes": [] },
+    { "collectionGroup": "journalEntries", "fieldPath": "attachments", "indexes": [] },
+    { "collectionGroup": "journalEntries", "fieldPath": "deviceId",    "indexes": [] },
 
-    { "collectionGroup": "journalEntries", "fieldPath": "description",
-      "indexes": [] },
-    { "collectionGroup": "journalEntries", "fieldPath": "payloadHash",
-      "indexes": [] },
-    { "collectionGroup": "journalEntries", "fieldPath": "tags",
-      "indexes": [] },
-
-    // accountIds تُستعلم بـ array-contains فقط ⇒ نُبقي ARRAY_CONFIG ونُلغي الترتيبين
+    // accountIds و accountTypes و scopes تُستعلم بـ array-contains فقط ⇒ نُلغي الترتيبين
     { "collectionGroup": "journalEntries", "fieldPath": "accountIds",
       "indexes": [ { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" } ] },
+    { "collectionGroup": "journalEntries", "fieldPath": "accountTypes",
+      "indexes": [ { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" } ] },
+    { "collectionGroup": "journalEntries", "fieldPath": "scopes",
+      "indexes": [ { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" } ] },
 
-    { "collectionGroup": "obligations", "fieldPath": "notes",       "indexes": [] },
-    { "collectionGroup": "debts",       "fieldPath": "notes",       "indexes": [] },
-    { "collectionGroup": "auditLogs",   "fieldPath": "beforeAfter", "indexes": [] }
+    { "collectionGroup": "obligations", "fieldPath": "notes",        "indexes": [] },
+    { "collectionGroup": "obligations", "fieldPath": "installments", "indexes": [] },
+    { "collectionGroup": "debts",       "fieldPath": "notes",        "indexes": [] },
+    { "collectionGroup": "debts",       "fieldPath": "followUps",    "indexes": [] },
+    { "collectionGroup": "debts",       "fieldPath": "installments", "indexes": [] },
+    { "collectionGroup": "auditLogs",   "fieldPath": "before",       "indexes": [] },
+    { "collectionGroup": "auditLogs",   "fieldPath": "after",        "indexes": [] },
+    { "collectionGroup": "maintenance", "fieldPath": "grandTotals",  "indexes": [] },
+    { "collectionGroup": "maintenance", "fieldPath": "periodTotals", "indexes": [] }
   ]
 }
 ```
 
+**الاستثناءان الأخيران مهمّان:** `maintenance/rebuild` يحمل خريطتَي تراكم قد تبلغا 45 مفتاحاً،
+ويُكتب **مرة لكل صفحة** أثناء إعادة البناء (~47 كتابة). فهرستهما الأحادية تُنتج ~4,200 مدخلة فهرس
+بلا أي استعلام يستفيد منها.
+
 **البحث النصي** (وصف، ملاحظات، وسوم) يتم **محلياً على النتائج المحمَّلة** في نطاق فترة محدَّدة.
-Firestore لا يملك بحثاً نصياً، والبديل (Algolia/Typesense) يحتاج خادماً ⇒ **Blaze**. قصور معلن (18 بند 10).
+Firestore لا يملك بحثاً نصياً، والبديل (Algolia/Typesense) يحتاج خادماً ⇒ **Blaze**. قصور معلن (18.1 بند 10).
+
 
 ---
 
@@ -843,35 +989,46 @@ Firestore لا يملك بحثاً نصياً، والبديل (Algolia/Typesens
 و`obligations.paidMinor` و`debts.settledMinor` و`budgets.spentMinor` و`financialGoals.savedMinor`
 **إسقاطات** قابلة للحساب من الحقيقة. أي تعارض بينهما ⇒ **الإسقاط خاطئ، لا الدفتر.**
 
-لذلك ثلاثة إجراءات متدرِّجة التكلفة، لا إجراء واحد:
+القسم 12 يعطي **خوارزمية** `rebuildProjections` ومستند `maintenance/rebuild`. هذا القسم يعطي
+**الإجراء التشغيلي**: الفحوص الأرخص التي تسبقه، ومتى يُشغَّل ومن يُشغّله، وكيف يُعرض، وماذا يحدث
+عند كشف انحراف. ثلاثة إجراءات متدرِّجة التكلفة، لا إجراء واحد:
 
-| الإجراء | ما يفعله | التكلفة | متى يُشغَّل |
-|---|---|---|---|
-| `runLedgerHealthCheck()` | **فحص** بصمة الدفتر وميزان المراجعة. لا يكتب شيئاً. | **~90 قراءة** | تلقائياً عند أول فتح للتطبيق كل يوم |
-| `reconcileAccount(accountId)` / `reconcileObligation(id)` | **فحص** حساب/التزام واحد مقابل `postings` | **~7 قراءات** للواحد | عند الطلب من شاشة الحساب، وتلقائياً لكل حساب منحرف يكشفه الفحص اليومي |
-| `rebuildProjections(scope)` | **إصلاح**: يُعيد حساب الإسقاطات بقيم مطلقة من `postings` | **~14,000 قراءة** بعد 3 سنوات | **يدوياً فقط، بموافقة صريحة من المالك** |
+| الإجراء | ما يفعله | التكلفة | متى يُشغَّل | من يُشغّله |
+|---|---|---|---|---|
+| `runLedgerHealthCheck()` | **فحص** بصمة الدفتر وميزان المراجعة. **لا يكتب أي إسقاط** | **~90 قراءة + 1 كتابة** | تلقائياً عند أول فتح للتطبيق كل يوم | النظام، في الخلفية، غير حاجب |
+| `reconcileAccount(id)` · `reconcileObligation(id)` · `reconcileDebt(id)` | **فحص** كيان واحد مقابل الدفتر | **~7 قراءات** للواحد | عند الطلب من شاشة الكيان، وتلقائياً لكل كيان منحرف يكشفه الفحص اليومي | المستخدم بزر، أو الفحص اليومي |
+| `rebuildProjections(scope)` | **إصلاح**: يُعيد حساب الإسقاطات بقيم مطلقة من `postings` | **~14,000 قراءة** بعد 3 سنوات | **يدوياً فقط، بموافقة صريحة** | المالك وحده، من شاشة سلامة البيانات |
 
 ### 16.1 `reconcileAccount` — التسوية الرخيصة
 
 ```ts
 // domain/ledger/reconcile.ts  —  نقية: تأخذ أرقاماً وتُعيد حكماً، لا تلمس Firestore
 export interface AccountReconciliation {
-  accountId: string;
+  accountId: AccountId;
+  normalSide: Side;
   storedDebitTotalMinor: Minor;      // من accounts/{id}
   storedCreditTotalMinor: Minor;
-  ledgerDebitTotalMinor: Minor;      // من sum() على postings
-  ledgerCreditTotalMinor: Minor;
-  storedBalanceMinor: Minor;
-  derivedBalanceMinor: Minor;        // openingBalanceMinor ± الإجماليات الدفترية
+  ledgerDebitTotalMinor: Minor;      // من sum('debitMinor')  على postings
+  ledgerCreditTotalMinor: Minor;     // من sum('creditMinor') على postings
+  storedBalanceMinor: Minor;         // مشتقّ من المخزَّن (لا حقل مخزَّن — I4)
+  ledgerBalanceMinor: Minor;         // مشتقّ من الدفتر
   debitDriftMinor: Minor;            // stored − ledger
   creditDriftMinor: Minor;
   balanceDriftMinor: Minor;
   verdict: 'clean' | 'drift';
 }
 
+/** الرصيد **دائماً** مشتقّ: لا حقل `balanceMinor` في أي مستند (I4). */
+export function balanceOf(
+  normalSide: Side, debitTotalMinor: Minor, creditTotalMinor: Minor,
+): Minor {
+  return normalSide === 'debit'
+    ? subMinor(debitTotalMinor, creditTotalMinor)
+    : subMinor(creditTotalMinor, debitTotalMinor);
+}
+
 export function judgeAccount(
-  acc: { accountId: string; type: AccountType; openingBalanceMinor: Minor;
-         balanceMinor: Minor; debitTotalMinor: Minor; creditTotalMinor: Minor },
+  acc: Pick<Account, 'accountId' | 'normalSide' | 'debitTotalMinor' | 'creditTotalMinor'>,
   ledger: { debitMinor: Minor; creditMinor: Minor },
 ): AccountReconciliation;
 ```
@@ -879,116 +1036,132 @@ export function judgeAccount(
 ```ts
 // data/ledger/reconcile.ts  —  الطبقة الوحيدة التي تلمس Firestore
 export async function reconcileAccount(
-  ctx: DataContext, accountId: string,
+  ctx: DataContext, accountId: AccountId,
 ): Promise<AccountReconciliation> {
   const accRef = doc(db, `users/${ctx.uid}/accounts/${accountId}`);
-  const base   = query(
+  const rows   = query(
     collection(db, `users/${ctx.uid}/postings`),
     where('accountId', '==', accountId),
-    where('reversed', '==', false),
   );
-
+  // لا مرشِّح `reversed`: صفّ الترحيل لا يحمل دورة حياة، والعكس يكتب صفوفاً معاكسة
+  // ⇒ المجموع يُصفِّر نفسه رياضياً (القسم 1.2 حجة 2).
+  //
   // ADR-016: لا مستند عدّاد ساخن. التجميع عند الطلب من الخادم.
-  // getAggregateFromServer **لا يعمل داخل runTransaction ولا دون اتصال** — وهذا مقبول
+  // getAggregateFromServer **لا يعمل داخل runTransaction ولا دون اتصال** — مقبول
   // لأنه أداة تسوية لا مسار كتابة.
-  const [accSnap, dr, cr] = await Promise.all([
+  const [accSnap, agg] = await Promise.all([
     getDoc(accRef),
-    getAggregateFromServer(query(base, where('side', '==', 'debit')),
-                           { total: sum('amountMinor') }),
-    getAggregateFromServer(query(base, where('side', '==', 'credit')),
-                           { total: sum('amountMinor') }),
+    getAggregateFromServer(rows, {
+      debit:  sum('debitMinor'),
+      credit: sum('creditMinor'),
+    }),
   ]);
 
-  return judgeAccount(accSnap.data() as never, {
-    debitMinor:  dr.data().total as Minor,
-    creditMinor: cr.data().total as Minor,
+  return judgeAccount(accSnap.data() as Account, {
+    debitMinor:  agg.data().debit  as Minor,
+    creditMinor: agg.data().credit as Minor,
   });
 }
 ```
 
-**تكلفته:** 1 قراءة للحساب + قراءة واحدة لكل 1,000 مدخلة فهرس في كل تجميع.
-حساب نقدي بـ 2,500 posting ⇒ `ceil(2500/1000) = 3` لكل جانب ⇒ **7 قراءات إجمالاً.**
+**تكلفته:** 1 قراءة للحساب + قراءة واحدة لكل 1,000 مدخلة فهرس. حساب نقدي بـ 2,500 ترحيل ⇒
+`ceil(2500/1000) = 3` لكل تجميع. والتجميعان في **طلب واحد** (`getAggregateFromServer` يقبل عدة
+تجميعات) ⇒ **~7 قراءات إجمالاً**، لا 14.
 
 **ثقب معلن:** `getAggregateFromServer` يتجاهل الذاكرة المؤقتة ⇒ **لا يعمل دون اتصال** ويرمي
-`unavailable`. الواجهة تعرض: «لا يمكن فحص سلامة البيانات دون اتصال» — ولا تعرض «سليم» أبداً.
+`unavailable`. الواجهة تعرض: «لا يمكن فحص سلامة البيانات دون اتصال» — **ولا تعرض «سليم» أبداً.**
 
 ### 16.2 `runLedgerHealthCheck` — بصمة الدفتر (ADR-016)
 
 ```ts
 export interface LedgerFingerprint {
-  takenAt: string;                   // ISO، بتوقيت ليبيا UTC+2
+  takenAt: ISODateTime;              // بتوقيت ليبيا UTC+2 الثابت
   postingCount: number;
-  debitSumMinor: Minor;              // Σ amountMinor حيث side='debit'  && !reversed
-  creditSumMinor: Minor;             // Σ amountMinor حيث side='credit' && !reversed
-  settlementSumMinor: Minor;         // Σ settlementDeltaMinor حيث !reversed  (ADR-021)
+  ledgerDebitSumMinor: Minor;        // Σ debitMinor  على كل postings
+  ledgerCreditSumMinor: Minor;       // Σ creditMinor على كل postings
+  ledgerSettlementSumMinor: Minor;   // Σ settlementDeltaMinor        (ADR-021)
   accountsDebitTotalMinor: Minor;    // Σ accounts.debitTotalMinor
   accountsCreditTotalMinor: Minor;
+  accountsEntryCountSum: number;     // Σ accounts.entryCount
 }
 
 export type HealthVerdict =
   | { kind: 'clean' }
-  | { kind: 'offline' }                                        // لا حكم — لا يُعرض «سليم»
-  | { kind: 'unbalancedLedger';   driftMinor: Minor }          // I1/I4 مكسور في الدفتر نفسه
-  | { kind: 'projectionDrift';    debitDriftMinor: Minor; creditDriftMinor: Minor };
+  | { kind: 'offline' }                                      // لا حكم — لا يُعرض «سليم»
+  | { kind: 'unbalancedLedger'; driftMinor: Minor }          // I2/I3 مكسور في الدفتر نفسه
+  | { kind: 'projectionDrift';  debitDriftMinor: Minor; creditDriftMinor: Minor };
 
 export function judgeLedger(fp: LedgerFingerprint): HealthVerdict;
 ```
 
-**الفحوص الثلاثة بترتيب الخطورة:**
+**الفحوص الثلاثة بترتيب الخطورة — الترتيب نفسه هو المعلومة:**
 
-| # | الفحص | ما يعنيه الفشل | الخطورة |
-|---|---|---|---|
-| 1 | `debitSumMinor === creditSumMinor` | **الدفتر نفسه غير متوازن** (I4). لا تُصلحه إعادة البناء — المشكلة في الحقيقة لا في الإسقاط. يعني `postings` ناقصة أو قيداً نصفه كُتب | **حرجة** |
-| 2 | `accountsDebitTotalMinor === debitSumMinor` و`accountsCreditTotalMinor === creditSumMinor` | الإسقاط منحرف عن الدفتر (I6). **تُصلحه إعادة البناء** | عالية |
-| 3 | `accountsDebitTotalMinor === accountsCreditTotalMinor` | ميزان المراجعة على المُجمَّعات (I4). ينهار إن فُقد طرف تحويل | عالية |
+| # | الفحص | الثابت | ما يعنيه الفشل | الخطورة |
+|---|---|---|---|---|
+| 1 | `ledgerDebitSumMinor === ledgerCreditSumMinor` | **I2، I3** | **الدفتر نفسه غير متوازن.** لا تُصلحه إعادة البناء — المشكلة في الحقيقة لا في الإسقاط. يعني صفوف ترحيل ناقصة أو قيداً نصفه كُتب | **حرجة** |
+| 2 | `accountsDebitTotalMinor === ledgerDebitSumMinor` (وكذلك الدائن) | **I5** | الإسقاط منحرف عن الدفتر. **تُصلحه إعادة البناء** | عالية |
+| 3 | `accountsDebitTotalMinor === accountsCreditTotalMinor` | **I2** | ميزان المراجعة على المُجمَّعات. ينهار إن فُقد طرف تحويل | عالية |
 
-**التكلفة:** 3 تجميعات على `postings` (14 + 14 + 14 قراءة بعد 3 سنوات) + استعلام `accounts` (45) ≈
-**~90 قراءة.** مرة يومياً = 0.18% من الحصة.
+**لماذا الترتيب مهم:** فشل (1) يجعل (2) و(3) بلا معنى، وإعادة البناء في تلك الحالة **تثبّت الخطأ**
+في الإسقاطات بدل أن تُصلحه. لذلك الحكم يتوقف عند أول فشل ولا يتابع.
 
-**مُشغِّل التأطير:** يُستدعى من `AppBootstrap` بعد المصادقة، بشرطين: وجود اتصال،
-و`settings/integrity.lastHealthCheckDay !== todayLibya()`. يُكتب `lastHealthCheckDay` بعد الفحص
-(كتابة واحدة). الفحص **غير حاجب**: ينفَّذ في الخلفية والتطبيق يعمل.
+**التكلفة:** 3 تجميعات على `postings` في طلب واحد (~14 قراءة بعد 3 سنوات) + استعلام `accounts` (45)
+≈ **~60–90 قراءة** + كتابة واحدة لطابع التشغيل. مرة يومياً = **0.18% من الحصة**.
 
-### 16.3 `orphanScan` — فحص اليتم (الثابت I24)
+**مُشغِّل التأطير:** يُستدعى من `AppBootstrap` بعد المصادقة بثلاثة شروط: وجود اتصال،
+و`maintenance/rebuild.state !== 'running'`، و`settings/integrity.lastHealthCheckDay !== todayLibya()`.
+يُكتب `lastHealthCheckDay` بعد الفحص. **غير حاجب**: ينفَّذ في الخلفية والتطبيق يعمل.
 
-الفحص الذي لا يستطيع التجميع كشفه: قيد بلا `postings`، أو posting بلا قيد.
+### 16.3 `orphanScan` — فحص اليتم (الثابت I11)
+
+الفحص الذي لا يستطيع التجميع كشفه: قيد بلا صفوف ترحيل، أو صفّ بلا قيد.
 
 ```ts
 /** يُشغَّل شهرياً أو عند طلب المالك. يمسح فترة واحدة فقط لتبقى التكلفة محدودة. */
-export async function orphanScan(ctx: DataContext, periodKey: string): Promise<OrphanReport>;
+export async function orphanScan(ctx: DataContext, periodKey: PeriodKey): Promise<OrphanReport>;
 
 export interface OrphanReport {
-  periodKey: string;
+  periodKey: PeriodKey;
   entriesScanned: number;
-  entriesWithWrongPostingCount: { entryId: string; lineCount: number; postingCount: number }[];
-  postingsWithMissingEntry: string[];        // postingId[]
+  postingsScanned: number;
+  /** القيد يعلن عدد سطور لا يطابق عدد صفوف الترحيل الموجودة فعلاً */
+  entriesWithWrongPostingCount: { entryId: EntryId; lineCount: number; postingCount: number }[];
+  /** صفّ ترحيل معرّفه يشير إلى قيد غير موجود */
+  postingsWithMissingEntry: string[];                 // postingId[]
+  /** صفّ ترحيل مبلغه لا يطابق مبلغ السطر المقابل في القيد */
+  postingsWithAmountMismatch: { postingId: string; postingMinor: Minor; lineMinor: Minor }[];
 }
 ```
 
-**الخوارزمية:** قراءة `journalEntries` حيث `periodKey == pk` (≈170 مستند/شهر)، وقراءة `postings`
-حيث `periodKey == pk` (≈400 مستند)، ثم تجميع محلي بـ `Map<entryId, count>` ومقارنة بـ `entry.lineCount`.
+**الخوارزمية:** قراءة `journalEntries` حيث `periodKey == pk` (≈170 مستنداً/شهر)، وقراءة `postings`
+حيث `periodKey == pk` (≈400 صفّ)، ثم تجميع محلي بـ `Map<entryId, Posting[]>` ومقارنة بـ
+`entry.lines` حرفاً بحرف: `lines.length` مقابل عدد الصفوف، وكل `lines[i].amountMinor` مقابل
+`debitMinor + creditMinor` للصفّ `${entryId}:${lines[i].lineNo}`.
+
+**لماذا المقارنة بالمبلغ أيضاً؟** `lineCount` وحده يكشف الصفّ المفقود ولا يكشف الصفّ **الخاطئ**.
+والمبلغ هو الحقل الذي تعتمد عليه كل التجميعات الخادمية.
+
 **التكلفة: ~570 قراءة لشهر واحد (1.1%).** مسح سنة كاملة = 6,840 قراءة (13.7%) ⇒ يُعرض كإجراء منفصل
-بتحذير تكلفة صريح.
+بتحذير تكلفة صريح، لا داخل الفحص اليومي.
 
 ### 16.4 `reconcileObligation` — ADR-021 كمصدر مستقل
 
-هذا هو الفحص الذي يكشف **الحدث المتوازن بدلتا تشغيلية خاطئة** (القسم 19 بند 7):
+هذا هو الفحص الذي يكشف **الحدث المتوازن بدلتا تشغيلية خاطئة** (19 عيب 7):
 
 ```ts
 export async function reconcileObligation(
-  ctx: DataContext, obligationId: string,
+  ctx: DataContext, obligationId: ObligationId,
 ): Promise<{ storedPaidMinor: Minor; ledgerSettlementMinor: Minor;
              driftMinor: Minor; verdict: 'clean' | 'drift' }> {
   const [obSnap, agg] = await Promise.all([
     getDoc(doc(db, `users/${ctx.uid}/obligations/${obligationId}`)),
     getAggregateFromServer(
       query(collection(db, `users/${ctx.uid}/postings`),
-            where('refs.obligationId', '==', obligationId),
-            where('reversed', '==', false)),
-      { total: sum('settlementDeltaMinor') },                 // ← ADR-021
+            where('obligationId', '==', obligationId)),     // حقل مسطَّح لا داخل خريطة
+      { total: sum('settlementDeltaMinor') },               // ← ADR-021 / I6
     ),
   ]);
-  const storedPaidMinor       = obSnap.data()!.paidMinor as Minor;
+  const storedPaidMinor       = (obSnap.data() as Obligation).paidMinor;
   const ledgerSettlementMinor = agg.data().total as Minor;
   const driftMinor            = subMinor(storedPaidMinor, ledgerSettlementMinor);
   return { storedPaidMinor, ledgerSettlementMinor, driftMinor,
@@ -996,128 +1169,117 @@ export async function reconcileObligation(
 }
 ```
 
+`reconcileDebt` مطابقة حرفياً بـ `where('debtId', '==', debtId)` و`debt.settledMinor` (I7).
+
 **لماذا هذا مصدر مستقل حقاً** — وهو الفرق الجوهري عن `deltaSumMinor` الوهمي المرفوض (القسم 1.3):
 `settlementDeltaMinor` يُكتب على **مستند آخر** (`postings`) في **سطر آخر** من خطة الكتابة، ويُقرأ
 بـ **مسار آخر** (تجميع خادمي على فهرس، لا قراءة مستند). كتابة ناقصة أو دلتا خاطئة في أحد المسارين
 **لا يمكن أن تنتشر** إلى الآخر. أما `deltaSumMinor` فكان يُكتب في نفس عبارة الكتابة من نفس القيمة
 المقروءة ⇒ لا يمكن أن يختلف إلا بخطأ كتابة حرفي.
 
+**وفائدة I8:** القاعدة تفرض أن أي صفّ دلتاه ≠ 0 يحمل مرجعاً تشغيلياً **واحداً بالضبط**
+(`obligationId` أو `debtId`، لا كليهما ولا لا شيء) ⇒ **لا دلتا تُحتسب مرتين ولا دلتا تضيع** من
+التجميع. بلا I8 كان تجميعان مختلفان قد يَعُدّان نفس الصفّ.
+
 **القيد الصادق:** الفحص يكشف **اختلاف** `paidMinor` عن مجموع الدلتا، ولا يكشف أن **الدلتا نفسها**
-خاطئة إن كانت خاطئة في الموضعين (مثال: الواجهة أرسلت 200.000 بدلاً من 20.000 فذهبت إلى الطرفين).
-هذا يكشفه **ثابت مختلف**: `|settlementDeltaMinor|` يجب أن يساوي `amountMinor` للسطر النقدي المقابل
-في نفس القيد — ويُفرَض في `planOperation` ويُختبَر في `20.1 / settlement-delta-matches-cash-leg`.
+خاطئة إن كانت خاطئة في الموضعين (الواجهة أرسلت 200.000 بدلاً من 20.000 فذهبت إلى الطرفين).
+هذا يكشفه **ثابت ثالث**: `|settlementDeltaMinor|` يجب أن يساوي `amountMinor` للسطر النقدي المقابل
+في نفس القيد — يُفرَض في `planOperation` وقت التخطيط لا بعد الكتابة، ويُختبَر في
+`unit/plan/obligation-payment / settlement-delta-matches-cash-leg`.
 
-### 16.5 `rebuildProjections` — الإجراء الكامل (ADR-015)
+### 16.5 `rebuildProjections` — الإجراء التشغيلي (ADR-015)
 
-#### 16.5.1 الشكل
+**البوابة والمؤشر والمُركِّم في مستند واحد: `maintenance/rebuild`** — بحقول `state` و`runToken`
+و`phase` و`periodQueue` و`periodCursor` و`pageCursor` و`grandTotals` و`periodTotals` (القسم 12).
+القواعد تقرأ `state` وحده (14.2 `rebuildIdle`).
 
-```ts
-export type RebuildScope =
-  | { kind: 'allAccounts' }
-  | { kind: 'account'; accountId: string }
-  | { kind: 'period';  periodKey: string }
-  | { kind: 'obligations' }
-  | { kind: 'debts' };
-
-export interface RebuildJob {
-  ownerUid: string; schemaVersion: number;
-  jobId: 'active';                     // معرّف محجوز — مستند واحد فقط في أي لحظة = القفل
-  scope: RebuildScope;
-  startedAt: string;
-  cursorPostingId: string | null;      // مؤشر الاستئناف (ADR-015)
-  processedCount: number;
-  phase: 'scanning' | 'applying';
-  note?: string;
-}
-```
-
-#### 16.5.2 المراحل
+#### 16.5.1 شريط الإجراء من البداية إلى النهاية
 
 ```
-rebuildProjections(scope):
+المرحلة 0 — بوابة وموافقة (لا تلقائية أبداً)
+  0.1  لا اتصال ⇒ ارفض: «إعادة البناء تحتاج اتصالاً» (getAggregateFromServer والاستعلامات الصفحية).
+  0.2  maintenance/rebuild.state === 'running' و runToken ليس لي والطابع أحدث من 10 دقائق
+       ⇒ REBUILD_TOKEN_LOST: «إعادة بناء تجري على جهاز آخر».
+  0.3  runToken لي ⇒ اعرض «استئناف» لا «بدء جديد».
+  0.4  بناءان في نفس اليوم (من startedAt التاريخي) ⇒ ارفض بتحذير حصة (15.4 سيناريو 1).
+  0.5  **اعرض على المالك قبل أي كتابة:** النطاق · تقدير القراءات والنسبة من الحصة ·
+       أن تسجيل العمليات **سيتوقف على كل الأجهزة** · المدة المتوقعة.
+       تأكيد صريح مطلوب (§3 «رسائل تأكيد قبل العمليات الحساسة»).
+  0.6  اقترح تصدير JSON قبل البدء (ق-1). إن قَبِل، نفّذه أولاً وانتظر نجاحه.
+  0.7  خُذ fingerprintBefore = runLedgerHealthCheck()   ← **قبل** إقفال الكتابة
+  0.8  الاستحواذ: set maintenance/rebuild { state:'running', runToken, phase:'accumulate', … }
+       ⇒ من هذه اللحظة كل كتابة مالية من أي جهاز مرفوضة بـ MAINTENANCE_RUNNING.
+  0.9  auditLogs: { action:'rebuildStarted', scope, fingerprintBefore, runToken }
 
-  المرحلة 0 — بوابة وموافقة (لا تلقائية أبداً)
-    0.1  إن لم يوجد اتصال ⇒ ارفض: «إعادة البناء تحتاج اتصالاً».
-    0.2  إن exists(rebuildJobs/active) ⇒ اعرض استئناف الإجراء القائم، لا إجراءً جديداً.
-    0.3  إن عدد إجراءات البناء اليوم ≥ 2 ⇒ ارفض بتحذير حصة (15.4 سيناريو 1).
-    0.4  اعرض على المالك: النطاق، تقدير القراءات، وأن العمليات المالية **ستتوقف** أثناء الإجراء.
-         تأكيد صريح مطلوب (§3 «رسائل تأكيد قبل العمليات الحساسة»).
-    0.5  اقترح تصدير JSON قبل البدء (ق-1). إن قَبِل، نفّذه أولاً.
-    0.6  اكتب rebuildJobs/active  ⇒ **من هذه اللحظة القواعد تمنع كل create مالي** (14.2).
-    0.7  اكتب auditLogs: { action: 'rebuildStarted', scope, fingerprintBefore }
+المرحلة 1 — المراكمة (phase = 'accumulate')
+  تُنفَّذ بخوارزمية القسم 12: استعلامات صفحية خارج المعاملات + runTransaction واحدة لكل صفحة
+  تكتب **مستند المؤشر فقط**. التراكم في grandTotals و periodTotals على نفس المستند
+  ⇒ انقطاع الاتصال أو إغلاق المتصفح يفقد **صفحة واحدة على الأكثر**.
 
-  المرحلة 1 — المسح (phase = 'scanning')، تراكم في الذاكرة، لا كتابة إسقاطات
-    1.1  رتّب postings بالترتيب الكلي المستقر (entryId ASC, lineIndex ASC) — فهرس 15.6.
-         **لا يُرتَّب بـ bookedAt** لأن إدخال قيد بتاريخ ماضٍ يُفسد مؤشر الاستئناف.
-    1.2  اقرأ صفحات بحجم 300، بدءاً من startAfter(cursorPostingId).
-    1.3  لكل posting غير معكوس (reversed == false):
-           acc[accountId].debit|credit            += amountMinor
-           per[accountId__periodKey].debit|credit  += amountMinor
-           per[accountId__periodKey].entryCount    += (أول posting لهذا القيد في هذه الفترة ? 1 : 0)
-           settle[refs.obligationId]               += settlementDeltaMinor
-           settle[refs.debtId]                     += settlementDeltaMinor
-    1.4  بعد كل صفحة: حدّث rebuildJobs/active { cursorPostingId, processedCount }  (كتابة واحدة)
-         ⇒ انقطاع الاتصال أو إغلاق المتصفح يفقد **صفحة واحدة على الأكثر**.
-    1.5  إلى نهاية المجموعة.
+المرحلة 2 — الكتابة (phase = 'write') — **قيم مطلقة لا increment**
+  2.1  writeBatch بحجم ≤ 100: إحلال مطلق لـ debitTotalMinor/creditTotalMinor/entryCount
+       على كل حساب في النطاق. **لا balanceMinor** — الرصيد مشتقّ (I4).
+  2.2  إحلال مطلق لـ debitMinor/creditMinor/entryCount على كل accountPeriods في النطاق.
+       مستند فترة موجود ولم تُنتجه المراكمة ⇒ **يُحذف** (مسموح أثناء الصيانة فقط، 14.2).
+  2.3  obligations: paidMinor = Σ settlementDeltaMinor، ثم
+       remainingMinor = totalMinor + extraChargesMinor − paidMinor
+       debts: settledMinor = Σ settlementDeltaMinor، ثم
+       remainingMinor = principalMinor − settledMinor
+  2.4  أي قيمة تخرج عن حدود القواعد (سداد زائد) ⇒ **توقّف فوراً** واكتب تقريراً.
+       **لا تقصّ القيمة ولا تُقرّبها** — قيمة خارج الحد دليل على خطأ في الدفتر لا في الإسقاط.
 
-  المرحلة 2 — التطبيق (phase = 'applying')، **قيم مطلقة لا دلتا**
-    2.1  لكل حساب في النطاق، في batch بحجم 100:
-           set(accounts/{id}, {
-             debitTotalMinor:  acc[id].debit,        // ← إحلال مطلق، لا increment()
-             creditTotalMinor: acc[id].credit,
-             balanceMinor: openingBalanceMinor ± (debit − credit) حسب type,
-           }, { merge: true })
-         تمرّ هذه الكتابة من القاعدة عبر فرع rebuildActive(uid) **فقط** (14.2)،
-         لأن القيم قد **تنقص** وهو ما يمنعه المسار الطبيعي.
-    2.2  لكل accountPeriods في النطاق: إحلال مطلق لـ debitMinor/creditMinor/entryCount.
-         كل مستند فترة موجود ولم يظهر في المسح ⇒ **يُحذف** (مسموح أثناء البناء فقط).
-    2.3  obligations: paidMinor = settle[id]  ثم remainingMinor = totalMinor + extraChargesMinor − paidMinor
-         debts:       settledMinor = settle[id] ثم remainingMinor = principalMinor − settledMinor
-         أي قيمة تخرج عن حدود القواعد (سداد زائد) ⇒ **توقّف** واكتب تقريراً، ولا تقصّ القيمة.
-
-  المرحلة 3 — الإقفال
-    3.1  أعد runLedgerHealthCheck() ⇒ fingerprintAfter.
-    3.2  اكتب auditLogs: { action: 'rebuildFinished', fingerprintBefore, fingerprintAfter,
-                            changedAccounts: [{ accountId, beforeBalanceMinor, afterBalanceMinor }] }
-    3.3  احذف rebuildJobs/active  ⇒ **تُفتح الكتابة المالية من جديد**.
-    3.4  اعرض على المالك تقرير «ما تغيّر»: جدول بالحسابات التي تغيّر رصيدها والفرق بالدرهم.
+المرحلة 3 — التحقّق والإفراج (phase = 'verify')
+  3.1  fingerprintAfter = runLedgerHealthCheck()
+  3.2  إن بقي الحكم 'projectionDrift' بعد البناء ⇒ state:'failed' + lastError،
+       **والبوابة تبقى مقفلة** ويُعرض للمالك: «الإصلاح لم ينجح. لا تسجّل عمليات.»
+  3.3  auditLogs: { action:'rebuildFinished', fingerprintBefore, fingerprintAfter,
+                    changedAccounts: [{ accountId, beforeBalanceMinor, afterBalanceMinor }] }
+  3.4  state:'done' ثم حذف/تصفير المستند ⇒ تُفتح الكتابة المالية.
+  3.5  اعرض تقرير «ما تغيّر».
 ```
 
 **لماذا القيم المطلقة لا `increment()`؟** `increment()` غير idempotent: إعادة تشغيل بناء متعطّل
-تُضاعف الأرقام. الإحلال المطلق idempotent بالتعريف ⇒ **استئناف آمن بلا سجل تنفيذ.**
+تُضاعف الأرقام. الإحلال المطلق idempotent بالتعريف ⇒ **استئناف آمن بلا سجل تنفيذ**، وهو السبب
+الذي يجعل القواعد تحتاج فرع استثناء يسمح بـ **نقصان** الإجماليات (14.2).
+
+**لماذا `fingerprintBefore` قبل الإقفال؟** `getAggregateFromServer` قراءة خادمية حرّة لا تمنعها
+البوابة، لكن أخذها قبل الإقفال يضمن أنها تمثّل الحالة التي شكا منها المالك، لا حالة تغيّرت
+بين الشكوى والإجراء.
 
 **التكلفة لكل نطاق** (بعد 3 سنوات):
 
 | النطاق | قراءات | كتابات |
 |---|---|---|
-| `allAccounts` | ~14,000 (28% من الحصة) | 45 حساب + ~1,620 فترة + ~47 تحديث مهمة = **~1,712** |
+| `allAccounts` | ~14,000 (**28%** من الحصة) | 45 حساب + ~1,620 فترة + ~47 مؤشر + 1 إفراج = **~1,713** (8.6%) |
 | `account` واحد | ~2,500 | 1 + ~36 فترة |
-| `period` واحد | ~400 | 45 + 45 |
-| `obligations` | ~900 (الـ postings ذات `refs.obligationId`) | ~40 |
+| `period` واحد | ~400 | ~45 + ~45 |
+| `obligations` | ~900 | ~40 |
 
-#### 16.5.3 كيف يُعرض للمستخدم
+#### 16.5.2 كيف يُعرض للمستخدم
 
 | الشاشة | المحتوى |
 |---|---|
-| **الإعدادات › سلامة البيانات** | بطاقة «حالة الدفتر»: نتيجة آخر فحص وتاريخه وزر «فحص الآن». وزر «إعادة بناء الإسقاطات» **بلون تحذيري** ونص: «إجراء إصلاحي. يوقف تسجيل العمليات مؤقتاً. يستهلك جزءاً كبيراً من حصة القراءة اليومية.» |
-| **عند كشف انحراف** | شريط ثابت أحمر على لوحة التحكم: «اكتُشف انحراف في الأرصدة بمقدار `1.500 د.ل`. الأرقام المعروضة قد تكون غير دقيقة.» + زر «التفاصيل». **لا يُخفى ولا يُهمَل تلقائياً** (§25 بند 15) |
-| **أثناء الإجراء** | شاشة حاجبة: المرحلة، `processedCount / المجموع المقدَّر`، نسبة مئوية، زر «إيقاف مؤقت» (يحفظ المؤشر ويترك `active` قائماً)، وتحذير: «لا تسجّل عمليات الآن» |
-| **بعد الإجراء** | تقرير «ما تغيّر» بجدول (الحساب · الرصيد قبل · الرصيد بعد · الفرق)، وزر «حفظ نسخة JSON من التقرير» |
-| **إن بقي `active` من جلسة سابقة** | عند بدء التطبيق: «هناك إعادة بناء غير مكتملة بدأت في `…`. الكتابة المالية موقوفة.» خياران: «استئناف» أو «إلغاء الإجراء» (يحذف `active` ويكتب `auditLogs` بـ `rebuildAborted` ⇒ **الإسقاطات تبقى منحرفة والشريط الأحمر يبقى ظاهراً**) |
+| **الإعدادات › سلامة البيانات** | بطاقة «حالة الدفتر»: نتيجة آخر فحص وتاريخه وزر «فحص الآن». وزر «إعادة بناء الإسقاطات» **بلون تحذيري** ونص: «إجراء إصلاحي. يوقف تسجيل العمليات على كل أجهزتك. يستهلك ~28% من حصة القراءة اليومية.» |
+| **عند كشف انحراف** | شريط ثابت أحمر على لوحة التحكم: «اكتُشف انحراف في الأرصدة بمقدار `1.500 د.ل`. الأرقام المعروضة قد تكون غير دقيقة.» + زر «التفاصيل». **لا يُخفى بزر «فهمت» ولا يزول إلا بفحص نظيف** (§25 بند 15) |
+| **أثناء الإجراء** | شاشة حاجبة: المرحلة (`accumulate` / `write` / `verify`) · `periodCursor` و`pagesApplied` · نسبة مئوية · زر «إيقاف مؤقت» (يحفظ المؤشر ويترك `state:'running'`) · تحذير: «لا تسجّل عمليات الآن» |
+| **على جهاز آخر أثناء الإجراء** | كل زر تسجيل معطَّل مع نص: «تجري صيانة للبيانات على جهاز آخر. حاول بعد قليل.» — لا رسالة `PERMISSION_DENIED` خامّة |
+| **بعد الإجراء** | تقرير «ما تغيّر»: جدول (الحساب · الرصيد قبل · الرصيد بعد · الفرق) + «حفظ نسخة JSON من التقرير» |
+| **إن بقي `state:'running'` من جلسة سابقة** | عند بدء التطبيق: «هناك إعادة بناء غير مكتملة بدأت في `…`. الكتابة المالية موقوفة.» خياران: **«استئناف»** أو **«إلغاء الإجراء»** (يكتب `auditLogs: rebuildAborted` ويُفرج عن البوابة ⇒ **الإسقاطات تبقى منحرفة والشريط الأحمر يبقى ظاهراً**) |
 
-#### 16.5.4 ماذا يحدث لو اكتُشف انحراف — شجرة قرار
+#### 16.5.3 ماذا يحدث لو اكتُشف انحراف — شجرة قرار
 
 | الحكم | الفعل الآلي | الفعل البشري | هل تُصلحه إعادة البناء؟ |
 |---|---|---|---|
 | `offline` | لا شيء. يُعرض «تعذّر الفحص» لا «سليم» | — | — |
-| `projectionDrift` | شريط أحمر + `auditLogs: driftDetected` بالأرقام | يراجع، ثم يُعيد البناء | **نعم** |
-| `unbalancedLedger` | شريط أحمر بنص **مختلف**: «الدفتر نفسه غير متوازن — إعادة البناء لا تُصلح هذا» + `auditLogs: ledgerUnbalanced` | تصدير JSON فوراً، ثم `orphanScan` للفترات، ثم قيد تسوية يدوي موثَّق بعد تحديد السبب | **لا** |
-| انحراف التزام/دين (ADR-021) | شريط على شاشة الالتزام + `auditLogs` | `rebuildProjections({kind:'obligations'})` | **نعم** |
-| `postingsWithMissingEntry` غير فارغة | تنبيه حرج | **لا تُحذف الـ postings** — يُكتب قيد تسوية بعد المعاينة. الحذف المالي محرَّم (I12) | جزئياً |
+| `projectionDrift` (I5) | شريط أحمر + `auditLogs: driftDetected` بالأرقام + تشغيل `reconcileAccount` على كل حساب لتحديد المنحرف | يراجع الحسابات المنحرفة، يصدّر نسخة، ثم يُعيد البناء | **نعم** |
+| `unbalancedLedger` (I2/I3) | شريط أحمر بنص **مختلف**: «الدفتر نفسه غير متوازن — إعادة البناء لا تُصلح هذا» + `auditLogs: ledgerUnbalanced` + **تعطيل زر إعادة البناء** | تصدير JSON فوراً · `orphanScan` على الفترات المشتبهة · ثم قيد `adjustment` موثَّق بعد تحديد السبب | **لا — وتعطيلها فعل متعمَّد** |
+| انحراف التزام/دين (I6/I7) | شريط على شاشة الكيان + `auditLogs` | `rebuildProjections({kind:'obligations'})` | **نعم** |
+| `postingsWithMissingEntry` غير فارغة | تنبيه حرج | **لا تُحذف صفوف الترحيل** — يُكتب قيد `adjustment` بعد المعاينة. الحذف المالي محرَّم | جزئياً |
+| `postingsWithAmountMismatch` غير فارغة | تنبيه حرج | يعني أن الصفّ لا يمثّل سطره ⇒ **لا إصلاح آلي ممكن**: القيد والصفّ كلاهما غير قابل للتعديل. العلاج: عكس القيد كاملاً وإعادة تسجيله | **لا** |
 
 **ثلاث قواعد مُلزِمة على كل مسار انحراف:**
 1. **لا إصلاح صامت أبداً.** كل تعديل إسقاط يمرّ بموافقة صريحة ويُسجَّل في `auditLogs` بالقيم قبل وبعد.
-2. **لا طمس للانحراف.** الشريط الأحمر لا يُخفى بزر «فهمت»، ويزول فقط بفحص نظيف.
+2. **لا طمس للانحراف.** الشريط الأحمر لا يُخفى، ويزول فقط بفحص نظيف.
 3. **التصدير قبل الإصلاح.** الإصلاح الوحيد الذي لا يمكن التراجع عنه هو الذي لم نأخذ نسخة قبله.
 
 ---
@@ -1139,7 +1301,7 @@ rebuildProjections(scope):
 | `journalEntries`, `postings`, `entryCorrections`, `auditLogs` | **لا ترحيل.** قارئ متعدد الإصدارات (17.3) |
 | `accounts`, `accountPeriods`, `obligations`, `debts`, `budgets`, `financialGoals`, `settings` | ترحيل بطيء عند القراءة + تثبيت عند أول كتابة طبيعية (17.4) |
 | `pendingCommands` | **لا ترحيل** — يُفرَّغ قبل كل تحديث إصدار (17.6 بند 3) |
-| `rebuildJobs` | **لا ترحيل** — عمره دقائق |
+| `maintenance/{taskId}` | **لا ترحيل** — عمره دقائق |
 
 ### 17.2 `schemaVersion`
 
@@ -1318,14 +1480,14 @@ export function migrateDoc<T>(raw: Record<string, unknown>): MigrateResult<T> {
 | # | العيب القاتل | ADR | أين عولج | كيف — بالضبط | ما بقي غير محميّ |
 |---|---|---|---|---|---|
 | 1 | **تناقض `periodKey`**: الوثائق تَعِد بـ «بداية شهر مالي» قابلة للتخصيص، والقيود تحمل `periodKey` مشتقاً من التاريخ. أي تغيير للإعداد يُفسد كل مستند فترة ماضٍ، ولا تعريف واحد لـ «هذا الشهر» | ADR-008 | **14.2** (`periodMatchesDate()` على `journalEntries` و`postings`) · **15.6** (كل فهرس فترة) · **16.5** (المسح يُجمّع على `periodKey` الدفتري) · **20.3** · **20.5** | `periodKey ≡ bookedAt[0:7]` **دائماً**، مفروض من **الخادم** في قاعدة الإنشاء. «بداية الشهر المالي» أُعيد تعريفها **نافذة عرض/تقرير** على نطاق `bookedAt`، في إسقاط منفصل، **لا تمسّ القيود ولا القواعد ولا `accountPeriods`**. تغيير الإعداد يُغيّر عدسة العرض فقط ⇒ **لا مستند يُفسد** | نافذة الشهر المالي، لأنها نطاق `bookedAt`، تقرأ من `postings` لا من `accountPeriods` ⇒ أغلى (~400 قراءة/شهر). مقبول ومعلَن (15.3) |
-| 2 | **رصيد النهاية المخزَّن** في مستند الفترة: حقل مشتقّ يُخزَّن بجوار الحركة التي أنتجته، فينحرف عنها بلا أي ثابت يمسكه؛ وتعديل قيد في فترة ماضية يُلزم تحديث **كل** الفترات اللاحقة | ADR-009 | **14.2** (قائمة مفاتيح بيضاء في `shapeIs()` على `accountPeriods`) · **16.5.2/2.2** · **20.3** · **20.5** | `accountPeriods` تحفظ **الحركة فقط**: `debitMinor` و`creditMinor` و`entryCount`. **القواعد ترفض من الخادم** أي مستند يحمل مفتاحاً خارج القائمة — فعودة `openingBalanceMinor`/`closingBalanceMinor` **مستحيلة** لا مجرّد ممنوعة. أرصدة البداية/النهاية **مشتقّة تراكمياً** عند القراءة من `openingBalanceMinor` للحساب + مجموع حركات الفترات الأسبق | الاشتقاق التراكمي يقرأ كل فترات الحساب حتى الفترة المطلوبة (~36 مستنداً بعد 3 سنوات لحساب واحد). مقبول، وفهرسه في 15.6 |
+| 2 | **رصيد النهاية المخزَّن** في مستند الفترة: حقل مشتقّ يُخزَّن بجوار الحركة التي أنتجته، فينحرف عنها بلا أي ثابت يمسكه؛ وتعديل قيد في فترة ماضية يُلزم تحديث **كل** الفترات اللاحقة | ADR-009 | **14.2** (قائمة مفاتيح بيضاء في `shapeIs()` على `accountPeriods`) · **16.5.2/2.2** · **20.3** · **20.5** | `accountPeriods` تحفظ **الحركة فقط**: `debitMinor` و`creditMinor` و`entryCount`. **القواعد ترفض من الخادم** أي مستند يحمل مفتاحاً خارج القائمة — فعودة `openingBalanceMinor`/`closingBalanceMinor` **مستحيلة** لا مجرّد ممنوعة. أرصدة البداية/النهاية **مشتقّة تراكمياً** عند القراءة: مجموع حركات الفترات الأسبق على ذلك الحساب — ولا `openingBalanceMinor` على الحساب أصلاً، لأن الرصيد الافتتاحي **قيد** من نوع `opening` لا حقل | الاشتقاق التراكمي يقرأ كل فترات الحساب حتى الفترة المطلوبة (~36 مستنداً بعد 3 سنوات لحساب واحد). مقبول، وفهرسه في 15.6 |
 | 3 | **توليد دورات التكرار من معاملة الدفع**: الدفع يُنشئ الدورة التالية ⇒ (أ) لا دورة بلا دفع فتختفي الالتزامات غير المدفوعة من «القادمة»، (ب) دفعتان جزئيتان تُنشئان دورتين، (ج) المعاملة تحمل مسؤوليتين | ADR-013 | **16** (مُشغِّل الاستدراك) · **20.2** · **20.4** | التوليد **من قالب التكرار عبر مُشغِّل الاستدراك** عند فتح التطبيق، بمفتاح idempotency حتمي `opId = rec:{recurringId}:{occurrenceKey}` ⇒ تعدّد الأجهزة والفتحات لا يُنتج تكراراً لأن `entryId === opId` (ADR-004). معاملة الدفع **لا تُنشئ أي دورة إطلاقاً** — ويُثبَّت ذلك باختبار يعدّ المستندات المكتوبة | لا توليد بلا فتح التطبيق (18 بند 9). و`maxBackfillDays` قيمته قرار مفتوح (22 بند م-1) |
 | 4 | **قسط القرض كمصروف**: الالتزامات كلها «مصروف» ⇒ سداد أصل قرض يتضخّم كمصروف، فـ «مصروفات الشهر» تحمل مالاً لم يُستهلك، وهو عين ما تحرّمه القاعدة 19.11 | ADR-011 | **14.2** (`nature` إلزامية عند الإنشاء ولا تتغيّر) · **15.6** (فهرس `nature`) · **20.1** · **20.3** | `ObligationNature = 'expense' \| 'financing'`. الالتزام `expense` يُقيَّد `Dr expense / Cr cash`. الالتزام `financing` يُقيَّد `Dr liability / Cr cash` — **لا حساب مصروف في القيد أصلاً**، فلا يمكن بنيوياً أن يدخل تقرير المصروفات (القسم 1.2 حجة 1). القواعد تفرض `nature` ولا تسمح بتغييرها بعد الإنشاء | القواعد لا تستطيع التحقق أن قيد التزام `financing` لم يمسّ حساب مصروف (يحتاج حلقة على `lines`). يكشفه `20.2 / financing-payment-touches-no-expense-account` + استعلام تسوية على `postings` |
 | 5 | **رفع `totalMinor`** لاستيعاب غرامة أو فاتورة متغيّرة: يُفقد المبلغ الأصلي، وتنقلب نسبة الإنجاز أثراً رجعياً، ويصير «المسدَّد بالكامل» غير قابل للتعريف | ADR-012 | **14.2** (`unchanged(['totalMinor', …])`) · **20.3** | `extraChargesMinor` حقل **منفصل** على الالتزام. `remainingMinor = totalMinor + extraChargesMinor − paidMinor`، وسقف السداد الزائد يُحسب على المجموع. القواعد تفرض `totalMinor` **ثابتاً إلى الأبد** من الخادم: محاولة تغييره ترتدّ بـ `PERMISSION_DENIED` | لا سجل تاريخي لتعاقب `extraChargesMinor` (من 0 إلى 50 إلى 75). مَن أراد التتبّع يقرأ `auditLogs`. مقبول |
-| 6 | **`deltaSumMinor` الوهمي**: حقل تحقّق مُقترح يُكتب في **نفس** عبارة الكتابة من **نفس** القيمة المقروءة ⇒ لا يمكن أن يختلف عن `balanceMinor` إلا بخطأ كتابة حرفي ⇒ **لا يكشف أي خطأ حسابي ولا أي كتابة ناقصة**، وإنما يمنح طمأنينة زائفة | ADR-021 | **1.3** (رُفض نصّاً) · **14.2** (غير موجود في المخطط) · **16.4** · **20.2** | الحقل **غير موجود** في أي مجموعة. بديله مصدر **مستقل حقاً**: `Σ settlementDeltaMinor` على `postings` — مستند آخر، سطر كتابة آخر، ومسار قراءة آخر (تجميع خادمي على فهرس). كتابة ناقصة في أحد المسارين **لا تنتشر** إلى الآخر | الفحص يكشف **اختلاف** الطرفين لا خطأً حاضراً في الطرفين معاً. يُغطّى بثابت ثالث: `\|settlementDeltaMinor\| === amountMinor` للسطر النقدي المقابل (16.4) |
+| 6 | **`deltaSumMinor` الوهمي**: حقل تحقّق مُقترح يُكتب في **نفس** عبارة الكتابة من **نفس** القيمة المقروءة ⇒ لا يمكن أن يختلف عن الرصيد المشتقّ إلا بخطأ كتابة حرفي ⇒ **لا يكشف أي خطأ حسابي ولا أي كتابة ناقصة**، وإنما يمنح طمأنينة زائفة | ADR-021 | **1.3** (رُفض نصّاً) · **14.2** (غير موجود في المخطط) · **16.4** · **20.2** | الحقل **غير موجود** في أي مجموعة. بديله مصدر **مستقل حقاً**: `Σ settlementDeltaMinor` على `postings` — مستند آخر، سطر كتابة آخر، ومسار قراءة آخر (تجميع خادمي على فهرس). كتابة ناقصة في أحد المسارين **لا تنتشر** إلى الآخر | الفحص يكشف **اختلاف** الطرفين لا خطأً حاضراً في الطرفين معاً. يُغطّى بثابت ثالث: `\|settlementDeltaMinor\| === amountMinor` للسطر النقدي المقابل (16.4) |
 | 7 | **الحدث المتوازن بدلتا تشغيلية خاطئة**: حدث دفعة التزام بأرجل 20.000 و`paidDeltaMinor: 200000` **متوازن تماماً**، يمرّ من كل ثابت وكل قاعدة، والرقم الخاطئ محفور في حدث غير قابل للتعديل ⇒ إعادة البناء تُعيد إنتاجه والتسوية تُبلّغ انحرافاً **صفر**. أقوى ميزة في سجل الأحداث عاجزة عن حماية أهم كيانات المتطلبات | ADR-002 + ADR-021 | **1.3** (سبب رفض event sourcing) · **16.4** · **20.1** · **20.2** | معالجة من ثلاث طبقات: (أ) الدلتا التشغيلية ليست حقلاً على الحدث بل **على `postings`**، أي على نفس المستند الذي يحمل المبلغ، فتُقارَن به مباشرة؛ (ب) ثابت في `planOperation`: `\|settlementDeltaMinor\| === amountMinor` للسطر النقدي المقابل في نفس القيد — يُرفض البناء وقت التخطيط لا بعد الكتابة؛ (ج) `reconcileObligation` يقارن `paidMinor` بمجموع الدلتا من مسار مستقل. و`reversed` موجود على القيد والـ posting ⇒ العكس يُستبعد من كل تجميع بلا منطق استثناء | إن أخطأت الواجهة في **المبلغ نفسه** (أرسلت 200.000 بدل 20.000) فكل الثوابت تمرّ: الرقم خاطئ **ودلالياً متّسق**. لا يكشفه إلا المستخدم. هذا هو بند 18.2 والقصور رقم 2 |
 | 8 | **عيب الأسبقية في القواعد**: (أ) منح `allow write` عام على `{document=**}` يسبق قاعدة مقيِّدة فيُلغيها تماماً لأن القواعد تُجمَع بـ OR؛ (ب) أسبقية `&&` على `\|\|` في شرط `allow create` تُنتج فرعاً **لا يفحص `isOwner` إطلاقاً** ⇒ أي شخص على الإنترنت يكتب في دفتر المالك | — | **14.1** (شرح العيبين) · **14.2** (القواعد المُصلَحة) · **20.3** | (أ) **لا منح عام في الملف إطلاقاً**: كل مجموعة تُعدّ صراحةً، وما لم يُعدّ مرفوض افتراضياً، وكتلة `match /users/{uid}` تطابق مستند المستخدم **وحده** بلا `{document=**}`، وحرّاسة نهائية توثيقية. (ب) كل شرط يبدأ بـ `isOwner(uid) &&` ثم `(` … `)`، وكل `||` داخل شرط **مُغلَّف بأقواس صريحة إلزامياً**. ويُثبَّت كلاهما باختبارات محاكي بهوية غير معتمدة | القواعد لا تُنشر إلا بعد نجاح `tests/rules/**` — وهو شرط إجرائي لا تقني. يُفرَض بمراجعة ما قبل النشر (§25 بند 10) |
-| 9 | **القيد اليتيم**: السطور في مجموعة فرعية ⇒ فشل جزئي يُنتج قيداً بلا سطور أو سطراً بلا قيد، وكلاهما يُفسد كل تجميع بصمت | ADR-002 | **14.2** (`postingId = entryId__lineIndex` + `lineCount`) · **16.3** · **20.2** · **20.4** | السطور **مضمَّنة** في مستند القيد ⇒ القيد وسطوره **ذرّة واحدة لا تنقسم**. و`postings` **مسطَّحة** في نفس المعاملة لتعطي `sum()` الخادمي بلا التنازل عن الذرّية. `postingId` **مشتقّ حتماً** من `entryId` و`lineIndex` ⇒ إعادة المحاولة تكتب نفس المستندات (idempotent) ولا تُنتج ازدواجاً. `entry.lineCount` يُخزَّن ويُفرَض = `lines.size()` من الخادم ⇒ `orphanScan` يقارنه بعدد الـ postings الفعلي | الـ batch قد يكتب القيد ويُغفل بعض الـ postings (القواعد تُقيّم كل كتابة مستقلة). تحميه ذرّية `runTransaction` في مسار الكتابة الوحيد، ويكشفه `orphanScan` (16.3). ADR-022 لو اعتُمد يضيّق الثقب أكثر |
+| 9 | **القيد اليتيم**: السطور في مجموعة فرعية ⇒ فشل جزئي يُنتج قيداً بلا سطور أو سطراً بلا قيد، وكلاهما يُفسد كل تجميع بصمت | ADR-002 | **14.2** (`postingId = entryId:lineNo` + فحص المبلغين) · **16.3** · **20.2** · **20.4** | السطور **مضمَّنة** في مستند القيد ⇒ القيد وسطوره **ذرّة واحدة لا تنقسم**. و`postings` **مسطَّحة** في نفس المعاملة لتعطي `sum()` الخادمي بلا التنازل عن الذرّية. `postingId` **مشتقّ حتماً** = `${entryId}:${lineNo}` ⇒ إعادة المحاولة تكتب نفس المستندات (idempotent) ولا تُنتج ازدواجاً. و`orphanScan` (16.3) يقارن `entry.lines.length` بعدد صفوف الترحيل الفعلي **وكل مبلغ سطر بمبلغ صفّه** | الـ batch قد يكتب القيد ويُغفل بعض الـ postings (القواعد تُقيّم كل كتابة مستقلة). تحميه ذرّية `runTransaction` في مسار الكتابة الوحيد، ويكشفه `orphanScan` (16.3). ADR-022 لو اعتُمد يضيّق الثقب أكثر |
 
 ### 19.1 ملخّص بمن يحمي من
 
@@ -1495,13 +1657,13 @@ tests/
 | | `an entry whose lineCount mismatches lines size is denied` | I24 |
 | | `an entry carrying an allowNegative key is denied` | **ADR-010** |
 | | `an entry with currency other than LYD is denied` | 2.1 |
-| `posting-shape.test.ts` | `a posting whose id is not entryId__lineIndex is denied` | العيب 9 |
+| `posting-shape.test.ts` | `a posting whose id is not entryId colon lineNo is denied` | العيب 9 |
 | | `a posting with a non-integer amountMinor is denied` | I2 |
 | | `updating amountMinor or settlementDeltaMinor on a posting is denied` | I13 |
 | `account-rules.test.ts` | `lowering debitTotalMinor outside a rebuild is denied` | 14.3/9 |
-| | `a balanceMinor inconsistent with the totals is denied` | **I5 من الخادم** |
-| | `a balanceMinor below minBalanceMinor is denied` | **I21 من الخادم** |
-| | `the same inconsistent write is allowed while rebuildJobs active exists` | **ADR-015** |
+| | `an update carrying a stored balanceMinor key is denied` | **I4 / ADR-009** |
+| | `totals whose derived balance falls below minBalanceMinor are denied` | **I15، I21 من الخادم** |
+| | `the same decreasing write is allowed while maintenance rebuild state is running` | **ADR-015 / I29** |
 | | `deleting an account is denied` | الأرشفة لا الحذف |
 | | `creating an account with a non-zero total is denied` | التهيئة |
 | `account-periods-rules.test.ts` | `an accountPeriods doc carrying closingBalanceMinor is denied` | **ADR-009 / I8** |

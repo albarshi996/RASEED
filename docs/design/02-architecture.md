@@ -1444,3 +1444,429 @@ export async function clearErrorLog(): Promise<void>
 > «رصيد حساب «نقد المحفظة» 314.500 د.ل لا يكفي لمبلغ 400.000 د.ل.»
 > «المبلغ أكبر من المتبقي. المتبقي على «إيجار المنزل» هو 600.000 د.ل.»
 > «لا يمكن إلغاء هذا الدخل لأن المبلغ أُنفق — ألغِ المصروفات المرتبطة أولاً، أو فعّل السماح بالرصيد السالب لهذا الحساب.»
+
+---
+
+## 8. التحقق بـ Zod — الحدّان بالضبط
+
+### 8.1 ADR-029 — حدّان لا أكثر ولا أقل
+
+> **Zod يعمل في موضعين فقط: (أ) حدّ الإدخال: قيم النموذج ⇒ `OperationRequest`.
+> (ب) حدّ القراءة: `DocumentSnapshot` ⇒ كيان مُتحقَّق. وبينهما `domain` تعمل على أنواع
+> موثوقة بلا أي تحقق متكرر.**
+
+```
+         (أ) حدّ الإدخال                                    (ب) حدّ القراءة
+   ┌───────────────────────────┐                   ┌─────────────────────────────────┐
+   │ قيم النموذج (نصوص)        │                   │ DocumentSnapshot (unknown)      │
+   │  ↓ zExpenseInput.safeParse │                   │  ↓ zStoredAccountVN.safeParse   │
+   │  ↓ parseAmountToMinor      │                   │  ↓ migrateAccount (ADR-019)     │
+   │ RecordExpenseRequest ✓     │                   │ Account ✓                       │
+   └─────────────┬─────────────┘                   └─────────────┬───────────────────┘
+                 │                                                │
+                 └──────────────►  domain (أنواع موثوقة)  ◄───────┘
+                                   لا تحقق · لا safeParse · لا حراسات تكرارية
+                                            │
+                                            ▼  (ج) حدّ الكتابة — تأكيد لا تحقق
+                                   encodeForWrite (دائماً للدفتر، وفي التطوير للباقي)
+```
+
+**لماذا حدّان لا ثلاثة ولا واحد؟**
+
+| البديل | سبب الرفض |
+|---|---|
+| **حدّ واحد (الإدخال فقط)** | يفترض أن Firestore يعيد ما كُتب. **غير صحيح:** جهاز بنسخة أقدم أو ترحيل ناقص أو كتابة يدوية من الكونسول تُعيد مستنداً بشكل مختلف. وبلا حدّ قراءة، `undefined` يتسلّل إلى حساب مبلغ فيصير `NaN` ويُعرض «NaN د.ل» — أو أسوأ، يُكتب |
+| **تحقق في كل طبقة** | كلفة تشغيل وتكرار مخططات. و`domain` تُختبر كدوال نقية على أنواع؛ حقنها بـ `safeParse` يُحوِّل كل دالة إلى `Result` بلا فائدة لأن المدخل تحقَّق عند الحدّ |
+| **`zod` في `data` فقط** | يُنتج مخططين منفصلين للنموذج والمستودع ⇒ **ينحرفان** ⇒ نموذج يقبل ما يرفضه المستودع |
+
+### 8.2 الحدّ (أ) — الإدخال: مخطط واحد مشترك بين النموذج والمستودع
+
+**المخططات تسكن `domain/contracts/` لا في `features/`.** `domain` يُسمح لها استيراد `zod`
+(حزمة نقية، وB1 يمنع `firebase` و`data` فقط). هذا ما يجعل **المصدر واحداً فعلاً**:
+
+```ts
+// domain/contracts/primitives.ts
+import { z } from 'zod'
+import { parseAmountToMinor } from '@/domain/money/parse'
+import type { Minor } from '@/domain/money/types'
+
+/**
+ * مبلغ من **نص المستخدم**. يمرّ بـ parseAmountToMinor (تجزئة نصية، بلا أي عشري عائم).
+ * **يُحرَّم `z.coerce.number()` و`z.number()` على مدخل نصي**: كلاهما يمرّ بـ Number()
+ * فيقبل '25.5055' ويُقرِّبه صامتاً — خرق مباشر للنواة §2.2 («رفض صريح لا تقريب صامت»).
+ */
+export const zMinorFromText = z.string().transform((raw, ctx): Minor => {
+  const r = parseAmountToMinor(raw)
+  if (r.ok) return r.value
+  ctx.addIssue({ code: 'custom', params: { money: r.code }, message: MONEY_ERRORS_AR[r.code] })
+  return z.NEVER
+})
+
+export const MONEY_ERRORS_AR = {
+  EMPTY:              'أدخل المبلغ.',
+  NOT_A_NUMBER:       'المبلغ غير صالح — أدخل رقماً.',
+  TOO_MANY_DECIMALS:  'الحد الأقصى ثلاث خانات عشرية (الدرهم).',
+  OUT_OF_RANGE:       'المبلغ أكبر من الحد المسموح.',
+  NEGATIVE:           'المبلغ يجب أن يكون أكبر من صفر.',
+} as const
+
+export const zDateKey   = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'التاريخ غير صالح.')
+export const zPeriodKey = z.string().regex(/^\d{4}-\d{2}$/, 'الفترة غير صالحة.')
+export const zNonEmptyAr = (field: string, max = 500) =>
+  z.string().trim().min(1, `${field} مطلوب.`).max(max, `${field} أطول من ${max} حرفاً.`)
+export const zId = z.string().min(1).max(128)
+export const zTags = z.array(z.string().min(1).max(40)).max(20).default([])
+```
+
+```ts
+// domain/contracts/requests/recordExpense.ts
+import { z } from 'zod'
+import { zDateKey, zId, zMinorFromText, zNonEmptyAr, zTags } from '../primitives'
+
+/** مخطط **النموذج**: ما يُدخله المستخدم (المبلغ نص). */
+export const zExpenseInput = z.strictObject({
+  amount:         zMinorFromText,
+  bookedAt:       zDateKey,
+  categoryId:     zId,
+  fromAccountId:  zId,
+  description:    zNonEmptyAr('الوصف', 500),
+  paymentMethod:  z.enum(['cash', 'card', 'transfer', 'wallet', 'other']).optional(),
+  payeeContactId: zId.optional(),
+  tags:           zTags,
+  notes:          z.string().trim().max(2000).optional(),
+})
+export type ExpenseInput = z.output<typeof zExpenseInput>
+
+/** يبني الطلب النهائي. `opId` **لا يأتي من النموذج كقيمة مُدخلة** بل من حالته (النواة §6.2). */
+export function toRecordExpenseRequest(input: ExpenseInput, opId: string): RecordExpenseRequest {
+  return { type: 'recordExpense', opId, amountMinor: input.amount, /* … */ }
+}
+
+/**
+ * مخطط **الطلب** (حدّ المستودع): نفس القواعد لكن المبلغ `Minor` صحيح لا نص.
+ * `data/ledger/postOperation` يتحقق به **قبل** `planOperation` ⇒ أي مسار برمجي
+ * يستدعي execute() مباشرة (استيراد، استدراك، سكربت) يُفحَص بنفس القواعد.
+ */
+export const zRecordExpenseRequest = z.strictObject({
+  type:          z.literal('recordExpense'),
+  opId:          zId,
+  amountMinor:   zMinorInt,                 // عدد صحيح موجب ≤ MAX_ABS_MINOR
+  bookedAt:      zDateKey,
+  categoryId:    zId,
+  fromAccountId: zId,
+  description:   zNonEmptyAr('الوصف', 500),
+  /* … بقية الحقول مطابقة لـ zExpenseInput */
+})
+```
+
+**المشاركة الفعلية بين النموذج والمستودع — بثلاث وسائل مجتمعة:**
+
+1. **البدائيات مشتركة حرفياً** (`zDateKey`, `zId`, `zNonEmptyAr`, `zTags`): أي تغيير في حدّ
+   طول الوصف يسري على الاثنين من مكان واحد.
+2. **اختبار تطابق إلزامي** (`tests/unit/contracts/parity.test.ts`): لكل عملية، يتحقق أن
+   `Object.keys(zExpenseInput.shape)` و`Object.keys(zRecordExpenseRequest.shape)` متطابقان بعد
+   استبعاد `{type, opId}` وإعادة تسمية `amount → amountMinor`. **انحراف حقل = اختبار يفشل.**
+   هذا أهم من توليد أحدهما من الآخر، لأن الاختلاف الوحيد المشروع (نص ⇔ `Minor`) يجعل التوليد
+   الآلي أعقد من قيمته.
+3. **`z.strictObject` في الاثنين**: حقل زائد = خطأ، لا تجاهل صامت. وهذا ما يكشف انحراف
+   النموذج عن الطلب لحظة التطوير.
+
+**قاعدة إضافية:** `features/*/forms/*` **لا تُعرِّف مخططاً**. تستورد من `domain/contracts/requests/**`.
+النموذج يربط المخطط بالحقول ويعرض `FieldError` من `z.treeifyError(result.error)`، ولا شيء غير ذلك.
+
+### 8.3 الحدّ (ب) — القراءة: فكّ ترميز + ترحيل بطيء
+
+```ts
+// data/codecs/decode.ts
+import type { DocumentSnapshot } from 'firebase/firestore'
+import type { z } from 'zod'
+
+export interface DecodeResult<T> {
+  readonly ok: boolean
+  readonly value?: T
+  readonly error?: AppError
+}
+
+/**
+ * حدّ القراءة الوحيد في النظام.
+ *   raw ⇒ (مخطط النسخة المخزَّنة) ⇒ migrate ⇒ (المخطط الحالي الصارم) ⇒ T
+ *
+ * **لماذا مخططان لا واحد؟** ADR-019: الدفتر لا يُرحَّل أبداً والمشتقات تُرحَّل بطيئاً عند القراءة.
+ * فالمخطط الأول **متسامح** (يقبل نسخاً أقدم وحقولاً لم نعرفها بعد)، والثاني **صارم**
+ * (يضمن أن ما يدخل `domain` مكتمل). التحقق بالمخطط الصارم وحده يرفض مستنداً سليماً بنسخة 1
+ * بعد إصدار النسخة 2 ⇒ تطبيق لا يقرأ بياناته الخاصة.
+ */
+export function decodeDoc<TStored, TOut>(
+  snap: DocumentSnapshot,
+  storedSchema: z.ZodType<TStored>,
+  migrate: (s: TStored) => TOut,
+  currentSchema: z.ZodType<TOut>,
+): DecodeResult<TOut>
+```
+
+```ts
+// data/codecs/account.ts
+export const zAccountStored = z.looseObject({        // متسامح: حقول مستقبلية تُمرَّر
+  schemaVersion: z.number().int().min(1),
+  ownerUid: z.string().min(1),
+  code: z.string().min(1),
+  type: z.enum(['asset', 'liability', 'income', 'expense', 'equity']),
+  normalSide: z.enum(['debit', 'credit']),
+  // ── كل حقل مالي: **عدد صحيح إلزاماً** (ADR-001) ──
+  debitTotalMinor:  z.number().int(),
+  creditTotalMinor: z.number().int(),
+  balanceMinor:     z.number().int(),
+  openingBalanceMinor: z.number().int(),
+  earmarkedMinor:   z.number().int().min(0),
+  minBalanceMinor:  z.number().int().max(0),
+  entryCount:       z.number().int().min(0),
+  balanceVersion:   z.number().int().min(0),
+  isCashLike: z.boolean(), isPostable: z.boolean(), isSystem: z.boolean(),
+  status: z.enum(['active', 'archived']),
+  createdAt: zTimestamp, updatedAt: zTimestamp,
+  /* … */
+}).superRefine((a, ctx) => {
+  // ── I3 يُفحَص **عند القراءة أيضاً** لا عند الكتابة فقط ──
+  const raw = a.debitTotalMinor - a.creditTotalMinor
+  const expected = a.normalSide === 'debit' ? raw : -raw
+  if (a.balanceMinor !== expected) {
+    ctx.addIssue({ code: 'custom', params: { invariant: 'I3' },
+      message: `رصيد الحساب «${a.code}» لا يطابق إجمالييه (I3).` })
+  }
+  // ── I22 (النواة R9): المستحق ليس نقداً ──
+  if (a.subtype === 'receivable' && a.isCashLike) {
+    ctx.addIssue({ code: 'custom', params: { invariant: 'I22' },
+      message: `الحساب «${a.code}» مستحق ومُعلَّم كنقد (I22).` })
+  }
+})
+```
+
+**فحص الثوابت عند القراءة ليس تكراراً للقواعد — بل الطبقة التي تكشف ما لا تراه القواعد.**
+النواة §18.4 تُعلن صراحةً: القواعد تُقيَّم لكل مستند على حدة ولا تفرض المقدار. ومستند حُدِّث من
+مسار التفّ على `postOperation` (سكربت، كونسول، نسخة قديمة) قد يصل سليم الشكل خاطئ القيمة.
+فحص I3 و I22 و I5 و I6 **عند كل فكّ ترميز** يحوّل ذلك إلى **إنذار فوري عند أول قراءة**
+بتكلفة صفر قراءات إضافية.
+
+### 8.4 سياسة فشل فكّ الترميز — قرار صريح يحتاج إقرار المالك
+
+> **القاعدة: فشل فكّ ترميز إسقاط مالي = خطأ سلامة حاجب. فشل فكّ ترميز مستند غير مالي = صفّ
+> بحالة خطأ، والتطبيق يستمر.**
+
+| المجموعة | عند فشل الفكّ | السبب |
+|---|---|---|
+| `accounts`, `periods`, `accountPeriods`, `budgetPeriods`, `obligations`, `debts`, `financialGoals`, `journalEntries`, `postings`, `meta` | **`kind: 'integrity'`, `blocking: true`** ⇒ شريط أحمر + **تعطيل كل الترحيل** + شاشة «سلامة البيانات» | استبعاد حساب تالف من مجموع «الأموال المتاحة» يُنتج **رقماً خاطئاً معروضاً كصحيح** — وهذا أسوأ من التعطيل. والنواة §12.10 تتبع نفس المنطق عند اختلال I4 |
+| `notes`, `tasks`, `notifications`, `worshipRecords`, `quranProgress`, `contacts`, `categories`, `recurrences`, `pendingCommands` | **صفّ واحد بحالة خطأ** + تسجيل + بقية الشاشة سليمة | لا رقم مالي يتأثر. وتعطيل التطبيق كله بسبب ملاحظة تالفة سلوك سيئ |
+| `settings` | **القيم الافتراضية + toast** «تعذّر قراءة بعض الإعدادات، تُستخدم القيم الافتراضية» | الإعدادات ليست مصدر حقيقة مالياً، والتعطيل بسببها غير مبرَّر |
+
+**هذا القرار يُرفَع للمالك** (§16.2 سؤال 3): مستند تالف واحد يُعطِّل تسجيل العمليات حتى
+إعادة البناء. البديل (الاستمرار مع استبعاد التالف) **مرفوض هندسياً** لأنه يعرض أرقاماً خاطئة
+بثقة. والمسار المعتمد يبقى سريعاً: شاشة «سلامة البيانات» تعرض المستند والسبب وزر «إعادة بناء».
+
+### 8.5 الحدّ (ج) — الكتابة: تأكيد لا تحقق
+
+```ts
+// data/codecs/encode.ts
+/**
+ * يُطبَّق قبل كل tx.set/tx.update. ليس تحققاً من مدخل مستخدم (تحقَّق عند الحدّ أ) بل
+ * **تأكيد ثابت**: ما تبنيه domain لا يُكتب إن خالف شكله.
+ */
+export function encodeForWrite<T>(value: T, schema: z.ZodType<T>, opts: { always: boolean }): T
+```
+
+| ما يُكتب | التحقق في الإنتاج | التحقق في التطوير |
+|---|---|---|
+| `journalEntries`, `postings` | **دائماً، مخطط كامل** | دائماً |
+| `accounts`, `obligations`, `debts`, `periods`, `budgetPeriods`, `financialGoals` | **تأكيدات صحيحة رخيصة فقط** (`Number.isInteger`, الحدود، `remaining` مشتق) | مخطط كامل |
+| غير المالي | لا شيء | مخطط كامل |
+
+**لماذا الدفتر دائماً والباقي لا؟** `journalEntries` و`postings` **غير قابلة للتعديل أو الحذف**
+(النواة §14.3: `allow update, delete: if false` على postings). كتابة خاطئة فيهما **لا تُصلَح أبداً**
+إلا بقيد عكس — أي أن الخطأ يبقى محفوراً في السجل. أما المشتقات فكلها **قابلة لإعادة البناء**
+(النواة §16.2) ⇒ تكلفة التحقق الكامل عليها في المسار الساخن لا تُشترى بفائدة.
+والتأكيدات الرخيصة (صحّة العدد والحدود واشتقاق `remaining`) تبقى **دائماً** لأن كلفتها صفر عملياً.
+
+### 8.6 قواعد Zod المُلزِمة
+
+| # | القاعدة | السبب |
+|---|---|---|
+| 1 | **ممنوع `z.coerce.*`** في كل المشروع | تحويل صامت: `z.coerce.number()` يقبل `''` ⇒ `0`، و`'25.5055'` ⇒ تقريب. خرق النواة §2.2 |
+| 2 | **ممنوع `z.number()` على مبلغ قادم من نص** | المسار الوحيد `zMinorFromText` ⇒ `parseAmountToMinor` |
+| 3 | `z.strictObject` لكل مخطط **إدخال**، و`z.looseObject` لكل مخطط **قراءة** | الإدخال: حقل زائد عيب. القراءة: حقل مستقبلي يجب أن يمرّ |
+| 4 | `zTimestamp = z.custom<Timestamp>(v => v instanceof Timestamp)` في `data/codecs` **لا** في `domain/contracts` | `Timestamp` نوع من `firebase/firestore`؛ `domain` تستورده كنوع فقط (النواة §4.1) ولا تفحصه تنفيذياً |
+| 5 | كل رسالة خطأ في كل مخطط **عربية** ومن `messages.ar.ts` أو مكتوبة بالقالب الثلاثي | المتطلبات §25 بند 18 |
+| 6 | `.default()` ممنوع على أي حقل مالي | قيمة افتراضية لمبلغ تُخفي حقلاً ناقصاً بدل كشفه |
+| 7 | المخططات **لا تُنشأ داخل مكوّن أو دالة** | إنشاء مخطط في كل تصيير كلفة بلا داعٍ؛ كلها ثوابت على مستوى الوحدة |
+
+---
+
+## 9. PWA والعمل دون اتصال
+
+### 9.1 ما يعمل دون اتصال وما لا يعمل — جدول صدق
+
+> **المتطلبات §22 تُلزم: «عدم اعتبار العملية محفوظة إلا بعد تأكيد نجاح الكتابة».
+> وق-1 يُلزم بألا نَعِد المستخدم بما لا نُوفي به. هذا الجدول هو الوعد، ولا نتجاوزه.**
+
+| الوظيفة | دون اتصال | كيف |
+|---|---|---|
+| فتح التطبيق والتنقل | **✓ كاملاً** | قوقعة التطبيق مُخزَّنة مسبقاً بعامل الخدمة |
+| قراءة الحسابات والأرصدة والتقارير الشهرية | **✓ من كاش Firestore** — **بوسم «بيانات غير محدَّثة»** | `persistentLocalCache` |
+| كشف الحركة (صفحات) | ✓ للصفحات التي زُرتها في هذه الجلسة أو سابقاً | الكاش |
+| الملاحظات والمهام والعبادات (قراءة) | ✓ بنفس الوسم | الكاش |
+| **تسجيل عملية مالية** | **✗ لا تُرحَّل** — تدخل الطابور بوسم «بانتظار المزامنة» و**تُستبعد من كل رصيد وتقرير** | `runTransaction` يفشل دون اتصال (النواة §6.6) ⇒ `pendingCommands` |
+| تعليم مهمة مكتملة / قراءة إشعار / تثبيت ملاحظة | **✓ تُطابَر محلياً وتُرسَل تلقائياً** | `setDoc`/`updateDoc` يُطابَران في Firestore |
+| التقارير التجميعية الخادمية (`sum`/`count`) | **✗** | `getAggregateFromServer` يتطلب الخادم ⇒ رسالة «يتطلب اتصالاً» |
+| التسوية وميزان المراجعة وإعادة البناء | **✗** | تتطلب تجميعاً خادمياً وكتابات ذرّية |
+| إشعار يصل والتطبيق مغلق | **✗ ولا نَعِد به** (ق-1) | يتطلب خادماً |
+
+### 9.2 ADR-030 — تهيئة Firestore: `persistentLocalCache` مُفعَّل
+
+```ts
+// data/firebase/app.ts
+import { initializeApp } from 'firebase/app'
+import { getAuth } from 'firebase/auth'
+import {
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+} from 'firebase/firestore'
+import { env } from '@/lib/env'
+
+export const firebaseApp = initializeApp({
+  apiKey: env.VITE_FIREBASE_API_KEY,
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: env.VITE_FIREBASE_APP_ID,
+})
+
+export const auth = getAuth(firebaseApp)
+
+/**
+ * **قرار معتمد: الكاش الدائم مُفعَّل، بمدير التبويبات المتعدد.**
+ *
+ * `initializeFirestore` (لا `getFirestore`) لأن التهيئة يجب أن تسبق أي استخدام،
+ * و`enableIndexedDbPersistence` **مهجورة** ومحظورة بـ B12.
+ *
+ * `persistentMultipleTabManager` لا `persistentSingleTabManager`: المالك يفتح التطبيق على
+ * الحاسوب والهاتف **وقد يفتح تبويبين على الحاسوب**. المدير أحادي التبويب **يرمي استثناءً**
+ * في التبويب الثاني ⇒ تطبيق لا يعمل بلا سبب مفهوم للمستخدم.
+ *
+ * `cacheSizeBytes` محدود بـ 40MB لا `CACHE_SIZE_UNLIMITED`: الكاش غير المحدود ينمو على
+ * هاتف بسعة محدودة بلا سقف، ولا فائدة منه عندنا لأن الدفتر يُقرأ بالصفحات لا كاملاً.
+ */
+export const db = initializeFirestore(firebaseApp, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(),
+    cacheSizeBytes: 40 * 1024 * 1024,
+  }),
+})
+```
+
+### 9.3 الخطر الحقيقي ولماذا لا يمسّ صحة الأرصدة
+
+**السيناريو المخيف المطروح:** «قراءة رصيد قديم من الكاش ثم الكتابة عليه».
+**تحليله ينتهي إلى أنه مستحيل في هذا التصميم، لسبب بنيوي واحد:**
+
+> **`runTransaction` لا يقرأ من الكاش المحلي أبداً.** قراءات `tx.get()` **خادمية حصراً**،
+> والمعاملة تحمل تحقّقاً تفاؤلياً من الإصدار: إن تغيّر أي مستند قرأته بين القراءة والالتزام،
+> **تُجهَض المعاملة (`aborted`) وتُعاد** بقراءات جديدة. ولهذا تحديداً `runTransaction` **يفشل
+> دون اتصال** بدل أن يعمل على بيانات قديمة.
+
+ومنه تتفرّع ثلاث نتائج، كل واحدة منها تُسقط فرعاً من الخطر:
+
+| الفرع | الحكم | الدليل |
+|---|---|---|
+| **قرار مالي مبني على رصيد من الكاش** | **مستحيل** | كل حوارس النواة (حدّ الرصيد، السداد الزائد، عتبة الميزانية، `payloadHash`) تُفحَص **داخل** `runTransaction` على قيم خادمية (النواة §11.2 و§5.4) |
+| **كتابة مالية تُطابَر محلياً فتُطبَّق لاحقاً على بيانات تغيّرت** | **مستحيل** | المعاملات لا تُطابَر. والطابور عندنا (`pendingCommands`) **لا يحمل نتيجة محسوبة** بل **نيّة** (`OperationRequest`)؛ وعند التفريغ تُحسب الخطة من جديد بقراءات خادمية طازجة |
+| **عرض رصيد قديم للمستخدم** | **ممكن وحقيقي** ⇒ **هذا هو الخطر الوحيد، ويُعالَج بالعرض لا بالتخزين** | `onSnapshot` يُصدِر لقطة من الكاش أولاً (`metadata.fromCache === true`) |
+
+**المعالجة الإلزامية للخطر الوحيد الباقي — أربع طبقات:**
+
+```ts
+// data/firebase/freshness.ts
+/**
+ * كل اشتراك يمرّ من هنا. يُحدِّث freshnessStore ويفرض ثابتاً محلياً حاسماً.
+ */
+export function trackFreshness(keyHash: string, meta: SnapshotMetadata, collection: string): void {
+  useFreshnessStore.getState().set(keyHash, {
+    fromCache: meta.fromCache,
+    hasPendingWrites: meta.hasPendingWrites,
+    atIso: nowIso(),
+  })
+
+  /**
+   * **الثابت A1 (جديد، خاص بهذه الطبقة):**
+   * لا لقطة لإسقاط مالي يجوز أن تحمل hasPendingWrites === true.
+   * السبب: كل كتابة مالية تمرّ بـ runTransaction الذي **لا يُطابَر محلياً** ⇒ لا كتابة
+   * معلّقة ممكنة على هذه المجموعات. ظهورها يعني **مسار كتابة التفّ على postOperation**
+   * (النواة §11.5 الصف 1: أعلى احتمال على الإطلاق) ⇒ إنذار سلامة فوري لا تجاهل.
+   */
+  if (meta.hasPendingWrites && FINANCIAL_COLLECTIONS.has(collection)) {
+    void logError(appError({
+      kind: 'integrity', blocking: true, code: 'A1_PENDING_WRITE_ON_PROJECTION',
+      retryable: false, context: { collection },
+      messageAr: 'اكتُشفت كتابة محلية معلّقة على بيانات مالية — تسجيل العمليات موقوف. '
+               + 'افتح «الإعدادات ← سلامة البيانات».',
+    }))
+    useGateStore.getState().block('integrity')
+  }
+}
+
+const FINANCIAL_COLLECTIONS = new Set([
+  'accounts', 'journalEntries', 'postings', 'periods', 'accountPeriods',
+  'budgetPeriods', 'obligations', 'debts', 'financialGoals',
+])
+```
+
+| الطبقة | الإجراء الملموس |
+|---|---|
+| **1 — وسم على كل رقم** | كل بطاقة مالية تعرض `StaleDataBadge` حين `fromCache === true`: «آخر تحديث: قبل 12 دقيقة — غير متصل». **لا رقم مالي يُعرض بلا حالة نضارة** |
+| **2 — شريط عام** | `ConnectivityProvider` يعرض شريطاً: «غير متصل — الأرقام المعروضة آخر ما وصل» عند `navigator.onLine === false` أو أي لقطة مالية `fromCache` |
+| **3 — حجب الأزرار** | دون اتصال: أزرار العمليات المالية تتحوّل إلى «حفظ في قائمة الانتظار» بنص صريح، **لا «حفظ»**. والنتيجة تُعرض بوسم «بانتظار المزامنة» و**تُستبعد من كل رصيد** (النواة ADR-007) |
+| **4 — حظر قراءة الكاش برمجياً** | `getDocFromCache` و`getDocsFromCache` **محظورتان في كل المشروع** (B11). لا مسار قراءة مالية من الكاش موجود أصلاً في الكود ليُسيء أحد استخدامه |
+
+**قرار مرافق: فهارس الكاش المحلي مُفعَّلة.**
+
+```ts
+// data/firebase/app.ts (يُنادى مرة واحدة بعد الإقلاع)
+getPersistentCacheIndexManager(db)?.enableIndexAutoCreation()
+```
+السبب: استعلامات كشف الحركة والالتزامات تعمل على الكاش أيضاً، وبلا فهارس محلية تُقيَّم بمسح كامل
+⇒ تجمّد الواجهة على الهاتف بعد سنة من البيانات. التكلفة: مساحة قرص إضافية داخل سقف 40MB.
+
+### 9.4 ADR-031 — عامل الخدمة: القوقعة فقط، صفر تخزين للبيانات
+
+**الإعداد القائم في `vite.config.ts` صحيح ويُثبَّت**، وهذه هي الأسباب التي تجعل كل سطر فيه
+**حمّالاً لوظيفة لا تجميلاً**:
+
+| الإعداد القائم | لماذا هو كذلك بالضبط |
+|---|---|
+| `globPatterns: ['**/*.{js,css,html,svg,woff2}']` | قوقعة التطبيق والخطوط المستضافة محلياً فقط |
+| **`runtimeCaching: []`** | **أهم سطر في الملف.** أي تخزين مؤقت لحركة Firestore يُنتج **طبقة كاش ثانية لا يراها SDK ولا تُبطَل بلقطة جديدة** ⇒ أرصدة قديمة بلا أي وسم نضارة، وخرق مباشر للنواة. الكاش المسموح الوحيد هو كاش Firestore نفسه (§9.2) |
+| `navigateFallbackDenylist: [/^\/__/]` | **حمّال أمان لا تنظيف:** مسار `/__/auth/handler` هو معالج Google Sign-In على Firebase Hosting. اعتراض عامل الخدمة له **يُعطِّل تسجيل الدخول كلياً** — وهو المسار الوحيد للمصادقة (ق-2) |
+| `registerType: 'prompt'` | التحديث الصامت قد يُبدِّل الكود تحت نموذج مفتوح نصف مملوء. المطالبة تُعرض كـ toast «نسخة جديدة متاحة — تحديث» |
+| `display: 'standalone'`, `dir: 'rtl'`, `lang: 'ar'` | تثبيت على الهاتف باتجاه صحيح (المتطلبات §2 بند 8 و§3) |
+
+**إضافة إلزامية — التحديث القسري:**
+
+```ts
+// app/boot/registerSW.ts
+const { needRefresh, updateServiceWorker } = useRegisterSW({ immediate: true })
+
+/**
+ * إن كانت نسخة المخطط على الخادم أحدث من نسخة هذا التطبيق (النواة §17.2)،
+ * فالتحديث **ليس اقتراحاً**: التطبيق القديم ممنوع من الكتابة بـ SCHEMA_VERSION_AHEAD،
+ * وتركه مفتوحاً يعني شاشات تعمل وأزرار ترفض بلا سبب مفهوم.
+ */
+if (gate === 'schemaAhead') {
+  await updateServiceWorker(true)     // يُفعِّل النسخة الجديدة ويُعيد التحميل فوراً
+}
+```
+
+**قرارات صريحة أخرى على PWA:**
+
+| القرار | السبب |
+|---|---|
+| **لا `Background Sync API`** | غير مدعومة في Safari/iOS (منصة المالك محتملة)، وتفريغ الطابور يحدث عند فتح التطبيق وعند حدث `online` — وهو كافٍ وصريح. والوعد بمزامنة خلفية لا تعمل على iOS خرق لق-1 |
+| **لا `Web Push`** | يتطلب خادماً (ق-1). إشعارات داخل التطبيق + `Notification` API عند الإذن **والتطبيق مفتوح** فقط |
+| **لا `persistent storage` بلا طلب** | `navigator.storage.persist()` يُطلب **مرة واحدة** بعد أول عملية ناجحة مع شرح: «لحماية بياناتك المحلية من الحذف التلقائي». رفض المستخدم لا يُعطِّل شيئاً |
+| **تنظيف الكاش عند تسجيل الخروج** | `clearIndexedDbPersistence(db)` بعد `signOut` و`terminate(db)` — وإلا بقيت بيانات مالية على جهاز قد يكون مشتركاً |

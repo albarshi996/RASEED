@@ -1082,3 +1082,401 @@ export function planPersonalCatchUp(
 | فشل جزئي | لا شيء مزعج؛ سطر في «سلامة البيانات ← آخر تشغيل للمُشغِّل» بالرمز والرسالة العربية |
 
 ---
+
+## 9. نموذج التنبيه — والقيود التي تفرضها قواعد النواة
+
+### 9.1 الأنواع
+
+```ts
+// domain/notifications/types.ts
+export type NotificationSeverity = 'critical' | 'warning' | 'info';
+
+export type NotificationType =
+  // الالتزامات — القسم 8 يطلب: قبل الاستحقاق، في يومه، وبعد التأخر
+  | 'obligationDueSoon' | 'obligationDueToday' | 'obligationOverdue'
+  | 'obligationPaidFull' | 'obligationPaidPartial'
+  // الديون — القسمان 9 و10
+  | 'debtPayableDueSoon' | 'debtPayableOverdue'
+  | 'debtReceivableDueSoon' | 'debtReceivableOverdue'
+  | 'debtSettledFull' | 'debtCollectedFull'
+  // الميزانيات — القسم 12
+  | 'budgetCategoryThreshold' | 'budgetCategoryExceeded'
+  | 'budgetOverallThreshold' | 'budgetOverallExceeded'
+  // الأهداف المالية — القسم 12
+  | 'goalMilestone' | 'goalAchieved' | 'goalTargetDateNear'
+  // المهام والتذكيرات — القسم 14
+  | 'taskDueToday' | 'taskOverdue'
+  // العبادات — القسم 15 (معطَّلة افتراضياً)
+  | 'worshipReminder'
+  // المتكررات — هذه الوثيقة
+  | 'recurrenceAwaitingConfirmation' | 'recurrenceMissedBeyondLimit'
+  | 'recurrenceGenerationCapped'
+  // النظام وسلامة البيانات — النواة §12.10 و§16
+  | 'integrityTrialBalanceBroken' | 'integrityAccountDrift'
+  | 'rebuildInProgress' | 'clockSkew'
+  | 'pendingCommandRejected'
+  // النسخ الاحتياطي — ق-1 (التصدير اليدوي هو النسخة الوحيدة)
+  | 'backupReminder';
+```
+
+**24 نوعاً.** وكل نوع له سطر كامل في جدول القسم 11: الشرط، مفتاح إزالة التكرار، الأهمية، الرابط،
+الإغلاق التلقائي، موضع التوليد، والقابلية للتجميع.
+
+```ts
+export type NotificationLink =
+  | { route: 'obligation'; id: string }
+  | { route: 'obligationsList'; filter: 'dueSoon' | 'overdue' }
+  | { route: 'debt'; id: string }
+  | { route: 'debtsList'; filter: 'payableOverdue' | 'receivableDue' | 'receivableOverdue' }
+  | { route: 'budget'; periodKey: PeriodKey; categoryId?: string }
+  | { route: 'goal'; id: string }
+  | { route: 'task'; id: string }
+  | { route: 'tasksList'; filter: 'today' | 'overdue' }
+  | { route: 'proposals' }
+  | { route: 'missedOccurrences' }
+  | { route: 'recurrence'; id: string }
+  | { route: 'worshipToday' }
+  | { route: 'integrity' }
+  | { route: 'settingsBackup' }
+  | { route: 'pendingQueue' }
+  | { route: 'entry'; id: string };
+
+/** موضوع التنبيه — يُستخدم في الإغلاق التلقائي بلا تحليل نصّ. */
+export interface NotificationSubject {
+  kind: 'obligation' | 'debt' | 'budgetCategory' | 'budgetOverall' | 'goal'
+      | 'task' | 'recurrence' | 'account' | 'system' | 'pendingCommand' | 'worship';
+  id: string;                        // معرّف الكيان، أو periodKey، أو 'system'
+  periodKey?: PeriodKey;
+  cycleKey?: string;                 // دورة التنبيه: dueDate أو periodKey أو dateKey
+}
+
+/** ما تُنتجه طبقة النطاق — تستهلكه data/ ويستهلكه WritePlan.notifications في النواة §7.3. */
+export interface NotificationDraft {
+  id: string;                        // == dedupeKey == معرّف المستند. حتمي دائماً
+  dedupeKey: string;
+  type: NotificationType;
+  severity: NotificationSeverity;
+  titleAr: string;
+  bodyAr: string;
+  link: NotificationLink;
+  subject: NotificationSubject;
+  /** يُملأ عند التجميع: عدد العناصر المدمجة. 1 أو غائب = تنبيه مفرد. */
+  groupCount?: number;
+  groupItemIds?: string[];           // ≤20، للعرض داخل التنبيه بلا استعلام
+  amountMinor?: number;              // Minor — يُنسَّق بـ formatLYD عند العرض فقط
+  dueDate?: DateKey;
+  source: 'transaction' | 'scan';
+  /** تجاوز السقف اليومي والساعات الهادئة — critical فقط (§12.5). */
+  bypassLimits?: boolean;
+}
+
+// users/{uid}/notifications/{notificationId}  — notificationId == dedupeKey
+export interface NotificationDoc extends NotificationDraft {
+  ownerUid: string;
+  schemaVersion: number;
+  read: boolean;
+  readAt: Timestamp | null;
+  createdAt: Timestamp;              // serverTimestamp — للترتيب
+  createdDateKey: DateKey;           // بتوقيت ليبيا — للسقف اليومي بـ count()
+  createdByDeviceId?: string;
+  createdBy: string;                 // uid
+  updatedAt: Timestamp;
+}
+```
+
+### 9.2 ثلاثة قيود تفرضها قواعد النواة §14.3 — والتصميم يحتويها بلا تعديل قاعدة
+
+قاعدة النواة على المجموعة:
+
+```javascript
+match /notifications/{id} {
+  allow read:   if isOwner(uid);
+  allow create: if isOwner(uid) && request.resource.data.ownerUid == uid;
+  allow update: if isOwner(uid) && touchedOnly(['read','readAt','updatedAt']);
+  allow delete: if isOwner(uid);            // الإشعارات ليست سجلاً محاسبياً
+}
+```
+
+ومنها تُستنبط ثلاث حقائق تصميمية **ملزِمة**:
+
+| القيد | الأثر على التصميم |
+|---|---|
+| **لا يُحدَّث إلا `read`/`readAt`/`updatedAt`** | لا حقل `status: 'open' \| 'resolved' \| 'dismissed'`. حالة التنبيه = **وجود المستند**. ولا حقل `occurrenceCount` يُزاد |
+| **الحذف مسموح** | **الإغلاق التلقائي = حذف** (القسم 13.1). وهو آمن لأن الحذف لا يحدث إلا متى صار شرط التوليد **كاذباً** ⇒ لا إعادة توليد |
+| **لا تُعدَّل بقية الحقول** | كل محتوى التنبيه (العنوان، النص، المبلغ، الرابط) يُحسب **عند التوليد** ويُجمَّد. تغيّر المبلغ لاحقاً ⇒ **حذف + إعادة توليد** بنفس المفتاح في الفتحة التالية |
+
+**وتصرّف المستخدم «تجاهل» (dismiss) لا يمكن تخزينه على المستند**، فيُخزَّن في
+`settings/notifications.dismissedKeys` (مجموعة `settings` قواعدها `allow write: if isOwner`):
+
+```ts
+dismissedKeys: Array<{ key: string; at: string /* ISO */ }>;   // ≤200، وأحدث 90 يوماً
+```
+
+**لماذا هذا أفضل من قاعدة جديدة أو مجموعة كتم مستقلة:** مستند `settings/notifications` **محمَّل
+أصلاً** في كل جلسة (الواجهة تحتاجه لمعرفة ما هو مُفعَّل) ⇒ فحص «أهذا مكتوم؟» بـ **صفر قراءات
+إضافية**. ومجموعة `notificationMutes` مستقلة تعني استعلاماً أو قراءة لكل مرشَّح. والمفتاح المكتوم
+يحمل **دورته** (`dueDate`/`periodKey`) ⇒ كتم تنبيه إيجار أكتوبر **لا يكتم** إيجار نوفمبر، والتقليص
+الدوري آمن لأن المفاتيح القديمة شروطها كاذبة أصلاً.
+
+### 9.3 لماذا المعرّف حتمي وليس `autoId`
+
+> **`notificationId === dedupeKey`**، ومن ثم فإن «منع التنبيهات المكررة» (القسم 17 من المتطلبات)
+> **خصيصة في مفتاح المستند** لا منطق تطبيقي — نفس المبدأ الذي بنت عليه النواة منع ازدواج القيود
+> (ADR-004).
+
+السيناريو الذي يحسمه: المستخدم يفتح التطبيق من الهاتف والحاسوب ثماني مرات في اليوم، وله إيجار
+يستحق بعد يومين. بمعرّف تلقائي: **8 تنبيهات متطابقة** في مركز التنبيهات، وشارة «8 غير مقروءة»،
+والمتطلب المنقوض نصّاً. بالمعرّف الحتمي `obl-soon:obl:rec_rent:2026-11-01`: التنبيه موجود من
+الفتحة الأولى، والفتحات السبع التالية تكتب **صفر** مستندات لأن المعرّف موجود في اللقطة أصلاً.
+
+(ملاحظة توافق: مُخطَّطات النواة §12.1/§12.4/§12.6 تكتب `notifications/{autoId}` في الـ pseudocode.
+المعرّف الحتمي **متوافق مع قواعدها حرفياً** (الـ `{id}` حرّ)، وهو تنفيذ لمتطلب «منع التكرار» لا
+انحراف عنه. مذكور في القسم 22 سؤال 6 طلباً للمصادقة الشكلية.)
+
+---
+
+## 10. مولّد التنبيهات — المدخلات والدوال
+
+### 10.1 موضع التوليد: داخل المعاملة أم في المسح؟
+
+**القاعدة الفاصلة:**
+
+> **إن كان الشرط يعتمد على نتيجة كتابة مالية ⇒ يُولَّد داخل المعاملة
+> (`WritePlan.notifications`). وإن كان الشرط دالّة في التقويم وحالة مخزَّنة ⇒ يُولَّد في الطور D.**
+
+| داخل المعاملة (`source: 'transaction'`) | في المسح (`source: 'scan'`) |
+|---|---|
+| `budgetCategoryThreshold` / `budgetCategoryExceeded` | كل تنبيهات الاستحقاق والتأخر (التزامات، ديون) |
+| `budgetOverallThreshold` / `budgetOverallExceeded` | `goalTargetDateNear` |
+| `goalMilestone` / `goalAchieved` | `taskDueToday` / `taskOverdue` |
+| `obligationPaidFull` / `obligationPaidPartial` | `recurrence*` |
+| `debtSettledFull` / `debtCollectedFull` | `backupReminder` / `clockSkew` / `rebuildInProgress` |
+| `integrityAccountDrift` (من `reconcileAccount`) | `pendingCommandRejected` / `worshipReminder` |
+| | `integrityTrialBalanceBroken` |
+
+**لماذا الميزانية والهدف داخل المعاملة إلزاماً؟** النواة §5.4 تفرضه نصّاً: `spentMinor` يُكتب
+**بقيمة مطلقة محسوبة بعد قراءة داخل المعاملة** لأن «تنبيه التجاوز يقرأ النتيجة داخل المعاملة».
+وتشرح الأثر لو خرج الفحص: جهازان يسجّلان مصروفين يعبران معاً عتبة 80% ⇒ قراءتان خارج المعاملة ⇒
+**تنبيهان**، وإعادة فتح التطبيق ⇒ **تنبيه ثالث**. ومعنا حارسان متعاضدان: حقل
+`budgetPeriods.categories[cat].alertFiredAtPercent` (النواة §4.7) **و** المعرّف الحتمي للتنبيه.
+
+### 10.2 المدخلات — كلها من لقطات محمَّلة أصلاً
+
+```ts
+// domain/notifications/generate.ts
+export interface NotificationScanInput {
+  obligations: readonly Obligation[];          // لقطة لوحة التحكم — 0 قراءات إضافية
+  debts: readonly Debt[];                      // لقطة لوحة التحكم
+  goals: readonly FinancialGoal[];             // status == 'active'
+  budgetPeriod: BudgetPeriod | null;           // الشهر الجاري
+  openTasks: readonly TaskRecurrenceContract[];// status == 'open' و dueDate <= today
+  proposals: { awaitingCount: number; oldestKey: DateKey | null };
+  missed: readonly MissedOccurrence[];         // من تقرير الطور A
+  cappedRuleIds: readonly string[];            // من الطور B
+  rejectedCommands: readonly { opId: string; messageAr: string }[];
+  integrity: { trialBalanced: boolean; rebuildStatus: string;
+               drifts: readonly AccountDrift[] };
+  clock: { skewMs: number };
+  backup: { lastExportDateKey: DateKey | null; accountAgeDays: number };
+  worship: { todayDocExists: boolean; activeWorshipRuleCount: number };
+}
+
+export interface ScanContext {
+  today: DateKey;
+  nowMs: number;                               // من ساعة الخادم (§2.5)
+  settings: NotificationSettings;
+  currentPeriodKey: PeriodKey;
+}
+
+/** نقية 100%: لا I/O، لا Date.now، لا randomUUID. تُختبر بجداول مدخلات. */
+export function planNotifications(
+  input: NotificationScanInput, ctx: ScanContext
+): NotificationDraft[];
+
+/** نقية: السقوف والتجميع والساعات الهادئة والكتم. */
+export function applyCapsAndGrouping(
+  candidates: readonly NotificationDraft[],
+  settings: NotificationSettings,
+  createdTodayCount: number
+): { toCreate: NotificationDraft[]; suppressed: Array<{ id: string; reason: SuppressReason }> };
+
+/** نقية: معرّفات التنبيهات المفتوحة التي صار شرطها كاذباً ⇒ تُحذف. */
+export function planNotificationResolutions(
+  openNotifications: readonly NotificationDoc[],
+  input: NotificationScanInput, today: DateKey
+): Array<{ id: string; reason: ResolveReason }>;
+
+export type SuppressReason = 'typeDisabled' | 'dismissed' | 'dailyCapReached'
+                           | 'grouped' | 'quietHours' | 'alreadyOpen';
+export type ResolveReason  = 'subjectSettled' | 'subjectCancelled' | 'supersededByStage'
+                           | 'periodEnded' | 'conditionFalse' | 'retentionExpired';
+```
+
+**الفائدة من نقاء هذه الثلاث:** تُختبر كلها بجدول «مدخلات ⇒ مخرجات متوقعة» **بلا محاكي Firebase
+وبلا متصفح**، وهو شرط النواة في §7.2 وأثره العملي أن كل صف في جدول القسم 11 يصير حالة اختبار.
+
+### 10.3 عتبات الاستحقاق تتبع أولوية الالتزام
+
+```ts
+export const DUE_SOON_LEAD_DAYS: Record<1 | 2 | 3, number> = {
+  1: 7,    // أولوية عالية (إيجار، قسط) — أسبوع
+  2: 3,    // متوسطة (فواتير) — ثلاثة أيام
+  3: 1,    // منخفضة (اشتراك صغير) — يوم
+};
+export const OVERDUE_BUCKETS_DAYS = [1, 7, 30] as const;      // تصعيد التزامات/ديون عليّ
+export const RECEIVABLE_BUCKETS_DAYS = [1, 14, 45] as const;  // تصعيد مستحقات لي
+export const GOAL_MILESTONES_PCT = [25, 50, 75] as const;
+export const BUDGET_STAGES = ['threshold', 'exceeded'] as const;
+```
+
+**لماذا سلال تأخر (buckets) لا تنبيه يومي؟** التزام متأخر 40 يوماً ينتج **40 تنبيهاً** بنمط
+«تنبيه لكل يوم تأخر»، فيصير مركز التنبيهات عديم القيمة ويتعلّم المستخدم تجاهله — وهو أسوأ نتيجة
+ممكنة لنظام تنبيه. بالسلال: **ثلاثة تنبيهات لكل دورة متأخرة** (يوم، أسبوع، شهر) بأهمية متصاعدة.
+والمفتاح يحمل السلّة (`:d7`) فالتنبيه الجديد **لا يحذف القديم** بل يُضاف فوقه، ويُغلقان معاً عند
+السداد.
+
+**لماذا العتبة تتبع `priority` لا قيمة ثابتة؟** لأن «قبل الاستحقاق» في القسم 8 بلا تحديد مدة،
+وتنبيه أسبوع كامل لاشتراك بـ 10.000 د.ل إغراق، ويوم واحد لإيجار بـ 800.000 د.ل متأخر جداً على
+قرار يحتاج تجهيز سيولة. والأولوية حقل قائم في `Obligation` (النواة §4.5) ⇒ لا حقل جديد.
+
+### 10.4 صياغة الرسائل العربية
+
+قواعد مُلزِمة على كل نصّ تنبيه (تطبيق القسم 25 بند 18 وق-3):
+
+1. **العنوان ≤ 60 حرفاً، والنص ≤ 160 حرفاً.**
+2. **كل تنبيه يذكر الرقم والسبب والخطوة التالية**، لا كلمة «تنبيه» مجرَّدة.
+3. **المبالغ بـ `formatLYD()` وحدها، بأرقام لاتينية و3 خانات** — ولا تُجمَّع ولا تُقرَّب في النص.
+4. **لا صيغة أمر ولا لوم** — خاصة في تنبيهات العبادات (القسم 15: «دون أحكام»).
+5 **التاريخ بصيغة `YYYY-MM-DD`** في النص، مع «بعد 3 أيام» كتوضيح نسبي بعده.
+
+مثال معتمد حرفياً:
+
+> **العنوان:** إيجار المنزل يستحق بعد 3 أيام
+> **النص:** المتبقي 800.000 د.ل، تاريخ الاستحقاق 2026-11-01. اضغط للدفع أو لتعديل الموعد.
+
+---
+
+## 11. جدول مولّد التنبيهات — قابل للتنفيذ مباشرة
+
+`O` = مستند التزام، `D` = دين، `G` = هدف، `B` = `budgetPeriods/{pk}`، `T` = مهمة،
+`today` = اليوم بتوقيت ليبيا، `lead` = `DUE_SOON_LEAD_DAYS[O.priority]`،
+`bkt` = أكبر سلّة تأخر متحققة. وكل «المفتاح» أدناه هو **معرّف المستند** حرفياً.
+
+### 11.1 الالتزامات (القسم 8 من المتطلبات)
+
+| النوع | شرط التوليد الدقيق | المفتاح (= المعرّف) | الأهمية | الرابط | الإغلاق التلقائي |
+|---|---|---|---|---|---|
+| `obligationDueSoon` | `O.remainingMinor > 0` و `O.status ∈ {upcoming,due,partiallyPaid}` و `0 < diffDays(today, O.dueDate) ≤ lead` | `obl-soon:{O.id}` | `warning` | `{obligation, O.id}` | `remainingMinor == 0` أو `status ∈ {paid,cancelled}` أو `O.dueDate ≤ today` (تحلّ محلّه المرحلة التالية) |
+| `obligationDueToday` | `O.remainingMinor > 0` و `O.dueDate == today` | `obl-today:{O.id}` | `warning` | `{obligation, O.id}` | `remainingMinor == 0` أو `cancelled` أو `O.dueDate < today` |
+| `obligationOverdue` | `O.remainingMinor > 0` و `diffDays(O.dueDate, today) ≥ bkt` لكل `bkt ∈ {1,7,30}` متحققة | `obl-late:{O.id}:d{bkt}` | `d1`→`warning`، `d7`/`d30`→`critical` | `{obligation, O.id}` | `remainingMinor == 0` أو `cancelled` |
+| `obligationPaidFull` | داخل معاملة `payObligation`: `remainingAfter == 0` | `obl-paid:{O.id}:{entryId}` | `info` | `{entry, entryId}` | الاحتفاظ: يُحذف بعد 30 يوماً من القراءة |
+| `obligationPaidPartial` | داخل المعاملة: `0 < remainingAfter < totalMinor + extraChargesMinor` | `obl-part:{O.id}:{entryId}` | `info` | `{entry, entryId}` | نفسها |
+
+**ملاحظة مفتاحية مهمة:** المفتاح لا يحمل `dueDate` لأن **كل دورة التزام مستند مستقل** بمعرّف
+`obl:{ruleId}:{dueDate}` (ADR-013) ⇒ `O.id` يحمل الدورة أصلاً. إضافة `dueDate` إلى المفتاح كان
+سيخلق تنبيهاً جديداً لو عدّل المستخدم `dueDate` — وهو **سلوك خاطئ**، لأن تأجيل الاستحقاق يجب أن
+يُحدّث التنبيه القائم لا أن يضيف ثانياً. (والتحديث هنا = حذف + إعادة توليد، القسم 13.2.)
+
+### 11.2 الديون (القسمان 9 و10)
+
+| النوع | شرط التوليد | المفتاح | الأهمية | الرابط | الإغلاق |
+|---|---|---|---|---|---|
+| `debtPayableDueSoon` | `D.direction=='payable'` و `D.status ∈ {open,partiallySettled}` و `D.expectedSettleAt` موجود و `0 ≤ diffDays(today, D.expectedSettleAt) ≤ 3` | `debt-pay-soon:{D.id}` | `warning` | `{debt, D.id}` | `remainingMinor == 0` أو `status ∈ {settled,cancelled,writtenOff}` أو تجاوز الموعد |
+| `debtPayableOverdue` | `payable` و `remainingMinor > 0` و `diffDays(D.expectedSettleAt, today) ≥ bkt ∈ {1,7,30}` | `debt-pay-late:{D.id}:d{bkt}` | `d1`→`warning`، البقية `critical` | `{debt, D.id}` | `remainingMinor == 0` أو `cancelled` |
+| `debtReceivableDueSoon` | `receivable` و `remainingMinor > 0` و `0 ≤ diffDays(today, D.expectedSettleAt) ≤ 3` | `debt-col-soon:{D.id}` | `info` | `{debt, D.id}` | `remainingMinor == 0` أو تجاوز الموعد |
+| `debtReceivableOverdue` | `receivable` و `remainingMinor > 0` و `diffDays(D.expectedSettleAt, today) ≥ bkt ∈ {1,14,45}` | `debt-col-late:{D.id}:d{bkt}` | `d1`→`info`، `d14`→`warning`، `d45`→`warning` | `{debt, D.id}` | `remainingMinor == 0` أو `writtenOff` أو `cancelled` |
+| `debtSettledFull` | داخل معاملة `payDebt`: `remainingAfter == 0` | `debt-settled:{D.id}:{entryId}` | `info` | `{entry, entryId}` | احتفاظ 30 يوماً بعد القراءة |
+| `debtCollectedFull` | داخل معاملة `collectDebt`: `remainingAfter == 0` | `debt-collected:{D.id}:{entryId}` | `info` | `{entry, entryId}` | نفسها |
+
+**قرار مبرَّر:** تأخر **مستحق لي** أهميته أدنى من تأخر **دين عليّ** بسلّة واحدة، وسلاله أوسع
+(1/14/45 لا 1/7/30). السبب: تأخر الدائن عني **يضرّني مالياً وسمعة** ويجب أن يصعد سريعاً؛ وتأخر
+مدين عندي مزعج لكن إغراق المستخدم بتنبيهات حرجة عن مال لدى أقارب **سلوك سيئ** (القسم 10 يطلب
+«سجل متابعات» وموعد تواصل، لا ضغطاً).
+
+### 11.3 الميزانيات (القسم 12) — داخل المعاملة حصراً
+
+| النوع | شرط التوليد (داخل `runTransaction` بعد حساب `spentAfter`) | المفتاح | الأهمية | الرابط | الإغلاق |
+|---|---|---|---|---|---|
+| `budgetCategoryThreshold` | `B.categories[cat]` موجود و `limitMinor > 0` و `pct = ratioBps(spentAfter, limit)/100` و `alertAtPercent ≤ pct < 100` و `alertFiredAtPercent == null` ⇒ يُولَّد **ويُكتب `alertFiredAtPercent = pct`** في نفس المعاملة | `budget-cat:{pk}:{categoryId}:threshold` | `warning` | `{budget, pk, categoryId}` | `pk` ليس الشهر الجاري ⇒ احتفاظ؛ أو `spent < limit × alertAt%` بعد عكس ⇒ **لا يُحذف تلقائياً** (انظر الملاحظة) |
+| `budgetCategoryExceeded` | `pct ≥ 100` و لا يوجد تنبيه تجاوز لهذه الفئة في هذا الشهر | `budget-cat:{pk}:{categoryId}:exceeded` | `warning` | `{budget, pk, categoryId}` | نفسها |
+| `budgetOverallThreshold` | `B.overallLimitMinor != null` و `overallLimit > 0` و `80 ≤ pct < 100` | `budget-all:{pk}:threshold` | `warning` | `{budget, pk}` | نفسها |
+| `budgetOverallExceeded` | `pct ≥ 100` | `budget-all:{pk}:exceeded` | `critical` | `{budget, pk}` | نفسها |
+
+**ثلاث قواعد صلبة هنا:**
+
+1. **لا تنبيه ميزانية لشهر بلا سقف.** إن لم يوجد `B` أو لم توجد الفئة فيه أو `limitMinor == null`
+   ⇒ **لا كتابة ميزانية ولا تنبيه** — تطبيق حرفي للقاعدة الصلبة في النواة §4.7 التي تمنع إنشاء
+   مستند ميزانية بلا سقف. القسمة على سقف غير موجود هي العيب الذي تمنعه.
+2. **تنبيه التجاوز لا يُغلق تلقائياً بانخفاض الإنفاق.** السبب: الانخفاض لا يحدث إلا بعكس قيد، وعكس
+   قيد في شهر مُقفل يهبط كتصحيح فترة سابقة ولا يُنقص `spentMinor` للشهر الأصلي (النواة §4.7).
+   فإغلاق التنبيه آلياً سيكون كذباً. يبقى مقروءاً ثم يُحذف بسياسة الاحتفاظ عند انتهاء الشهر.
+3. **عتبة 80% افتراضية وقابلة للضبط لكل فئة** (`alertAtPercent` — حقل قائم في النواة §4.7).
+   المالك يُراجع الافتراضي (سؤال 5 في §22.2 من النواة).
+
+### 11.4 الأهداف المالية (القسم 12)
+
+| النوع | الشرط | المفتاح | الأهمية | الرابط | الإغلاق |
+|---|---|---|---|---|---|
+| `goalMilestone` | داخل المعاملة: `pctAfter ≥ m` و `pctBefore < m` لأكبر `m ∈ {25,50,75}` متحققة | `goal-ms:{G.id}:p{m}` | `info` | `{goal, G.id}` | `G.status ∈ {cancelled}` ⇒ حذف؛ وإلا احتفاظ 30 يوماً بعد القراءة |
+| `goalAchieved` | داخل المعاملة: `savedAfter ≥ G.targetMinor` | `goal-done:{G.id}` | `info` | `{goal, G.id}` | `G.status == 'cancelled'` |
+| `goalTargetDateNear` | مسح: `G.status=='active'` و `G.targetDate` موجود و `0 < diffDays(today, G.targetDate) ≤ 30` و `G.savedMinor < G.targetMinor` | `goal-near:{G.id}:{monthKeyOf(G.targetDate)}` | `warning` | `{goal, G.id}` | `savedMinor ≥ targetMinor` أو `status != 'active'` أو تجاوز `targetDate` |
+
+نصّ `goalTargetDateNear` يحمل **الفارق لا نسبة مبهمة**:
+«هدف «سيارة» موعده 2026-11-05 (بعد 27 يوماً). المدخَر 6,400.000 من 12,000.000 د.ل، والمتبقي
+5,600.000 د.ل.» — بلا أي حكم ولا اقتراح استثماري (القسم 20 من سياسة المساعد: لا نصيحة مالية).
+
+### 11.5 المهام والتذكيرات (القسم 14)
+
+| النوع | الشرط | المفتاح | الأهمية | الرابط | الإغلاق |
+|---|---|---|---|---|---|
+| `taskDueToday` | `count(T: status=='open' && dueDate == today) ≥ 1` — **مجمَّع دائماً** | `task-today:{today}` | `info` | `{tasksList, 'today'}` | كل مهام اليوم `done`/`cancelled` ⇒ حذف؛ وإلا بانتهاء اليوم (احتفاظ) |
+| `taskOverdue` | `count(T: status=='open' && dueDate < today) ≥ 1` — **مجمَّع دائماً، مرة واحدة في اليوم** | `task-late:{today}` | `warning` | `{tasksList, 'overdue'}` | لا متأخرات مفتوحة ⇒ حذف |
+
+**مجمَّعان دائماً بلا استثناء، ولا تنبيه لكل مهمة.** السبب: المهام أكثر الكيانات عدداً، وتنبيه لكل
+مهمة متأخرة هو أسرع طريق لإغراق المركز. والمفتاح يحمل اليوم ⇒ تنبيه واحد يومياً كحدّ أقصى لكل نوع.
+و«لا تُعرض مهمة كمكتملة دون إجراء إكمال صريح» (القسم 14) محفوظ: التنبيه لا يُكمل شيئاً.
+
+### 11.6 العبادات (القسم 15) — معطَّل افتراضياً
+
+| النوع | الشرط | المفتاح | الأهمية | الرابط | الإغلاق |
+|---|---|---|---|---|---|
+| `worshipReminder` | `settings.types.worshipReminder.enabled == true` **(افتراضي `false`)** و `activeWorshipRuleCount > 0` و `worshipDays/{today}` **غير موجود** و `toLocalHm(now) ≥ '20:00'` | `worship:{today}` | `info` | `{worshipToday}` | وجود مستند اليوم ⇒ حذف؛ وإلا بانتهاء اليوم |
+
+**ثلاثة قيود أخلاقية مُلزِمة، ومصدرها نصّ القسم 15 («قسم شخصي هادئ ومحترم… دون أحكام أو تقييمات
+دينية على المستخدم»):**
+
+1. **افتراضياً معطَّل تماماً.** لا يُفعَّل إلا بطلب المستخدم من الإعدادات.
+2. **تنبيه واحد في اليوم كحدّ أقصى، وبعد الثامنة مساءً فقط**، وبصيغة محايدة:
+   «لم تُسجَّل متابعة اليوم في قسم العبادات.» — **لا** «فاتتك صلاة» ولا «لم تُكمل وردك».
+3. **لا تنبيه لصلاة بعينها ولا لذكر بعينه إطلاقاً.** مواقيت الصلاة مؤجَّلة أصلاً (القسم 15: «دون
+   أوقات ثابتة أو تقديرية غير موثوقة») ⇒ تنبيه بوقت صلاة سيكون **تقديراً غير موثوق** ⇒ ممنوع.
+
+### 11.7 المتكررات (هذه الوثيقة)
+
+| النوع | الشرط | المفتاح | الأهمية | الرابط | الإغلاق |
+|---|---|---|---|---|---|
+| `recurrenceAwaitingConfirmation` | `proposals.awaitingCount ≥ 1` | `rec-pending:{today}` | `info` | `{proposals}` | لا مقترح معلَّق ⇒ حذف |
+| `recurrenceMissedBeyondLimit` | `missed.length ≥ 1` | `rec-missed:{today}` | `info` | `{missedOccurrences}` | لا مواعيد فائتة ⇒ حذف |
+| `recurrenceGenerationCapped` | `cappedRuleIds.length ≥ 1` | `rec-capped:{ruleId}:{monthKeyOf(today)}` | `info` | `{recurrence, ruleId}` | القاعدة تحت السقف ⇒ حذف |
+
+### 11.8 النظام وسلامة البيانات والنسخ الاحتياطي
+
+| النوع | الشرط | المفتاح | الأهمية | الرابط | الإغلاق |
+|---|---|---|---|---|---|
+| `integrityTrialBalanceBroken` | `auditTrialBalance().balanced == false` | `integ-tb:{today}` | `critical` **ويتجاوز كل السقوف** | `{integrity}` | توازن الميزان ⇒ حذف |
+| `integrityAccountDrift` | `reconcileAccount(acc).drift != 0` | `integ-drift:{accountId}:{today}` | `critical` **ويتجاوز السقوف** | `{integrity}` | انحراف صفر في فحص لاحق ⇒ حذف |
+| `rebuildInProgress` | `meta/integrity.rebuildStatus == 'running'` | `integ-rebuild:{today}` | `info` | `{integrity}` | الحالة `idle` ⇒ حذف |
+| `clockSkew` | `|clock.skewMs| > 6h` | `clock-skew:{today}` | `critical` **ويتجاوز السقوف** | `{integrity}` | الانحراف داخل الحد ⇒ حذف |
+| `pendingCommandRejected` | مستند في `pendingCommands` بحالة `rejected` | `pending-rej:{opId}` | `warning` | `{pendingQueue}` | المستند حُذف أو صار `applied` ⇒ حذف |
+| `backupReminder` | `lastExportDateKey == null && accountAgeDays ≥ 7` **أو** `diffDays(lastExportDateKey, today) ≥ 30` | `backup:{monthKeyOf(today)}` | `warning` | `{settingsBackup}` | تصدير ناجح هذا الشهر ⇒ حذف |
+
+**لماذا `backupReminder` بأهمية `warning` ومفتاح شهري؟** لأن ق-1 جعل **التصدير اليدوي النسخة
+الاحتياطية الوحيدة** («التصدير اليدوي JSON ميزة أساسية في المرحلة الأولى، لا تأجيل — لأنها النسخة
+الاحتياطية الوحيدة»). فتجاهله ليس إزعاجاً صغيراً بل **خطر فقدان كامل**. والمفتاح الشهري يضمن
+تنبيهاً واحداً في الشهر لا أكثر.
+
+**ولماذا ثلاثة أنواع تتجاوز السقوف؟** لأن أثر كتمانها غير قابل للتصحيح: دفتر غير متوازن معه كل
+رقم في النظام مشكوك فيه (النواة §12.10)، وانحراف رصيد غير مُبلَّغ يتراكم، وساعة جهاز خاطئة تكتب
+تواريخ خطأ في دفتر لا يُحذف منه. وهذه بالضبط حالات «الأهم من راحة المستخدم».
+
+---
