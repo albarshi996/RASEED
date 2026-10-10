@@ -48,3 +48,16 @@ export function ratioBps(part: Minor, whole: Minor): Bps {
   const clamped = scaled < 0n ? 0n : scaled > 1_000_000n ? 1_000_000n : scaled
   return Number(clamped) as Bps
 }
+
+/**
+ * نسبة مئوية **منسَّقة للعرض** — سلسلة نصية جاهزة.
+ *
+ * موضعها هنا لا في الواجهة لأن قاعدة ESLint تمنع التقريب خارج طبقة المال،
+ * والمنع مقصود: التقريب في الواجهة أول خطوة نحو جمع قيم مقرَّبة.
+ * هذه الدالة تُنتج **نصًا** لا رقمًا، فلا يمكن أن يُجمع ناتجها.
+ */
+export function formatPercent(part: Minor, whole: Minor, fractionDigits = 0): string {
+  if (whole === 0) return '—'
+  const value = percentOf(part, whole)
+  return value.toFixed(fractionDigits) + '%'
+}

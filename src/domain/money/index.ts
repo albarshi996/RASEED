@@ -41,7 +41,7 @@ export {
   toMajorNumber,
 } from './arithmetic'
 
-export { mulRate, percentOf, ratioBps } from './rate'
+export { formatPercent, mulRate, percentOf, ratioBps } from './rate'
 
 export { allocateByWeights, splitEven } from './allocate'
 

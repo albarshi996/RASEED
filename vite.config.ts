@@ -10,7 +10,10 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'prompt',
+      // 'autoUpdate' لا 'prompt': الوضع 'prompt' يتطلب واجهة تطلب إذن التحديث،
+      // وبدونها يبقى عامل الخدمة على نسخة قديمة إلى الأبد — وقد حدث فعلًا.
+      // التحديث التلقائي أصحّ لتطبيق مالي: نسخة قديمة قد تعرض رصيدًا بمنطق قديم.
+      registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'رصيد | RASEED',

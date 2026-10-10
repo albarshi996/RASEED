@@ -10,6 +10,7 @@ import {
   where,
   writeBatch,
   type Firestore,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore'
 
 import { accountTypeOf, normalSideOf, SEED_ACCOUNTS, type AccountType } from '@/domain/ledger/chartOfAccounts'
@@ -143,29 +144,61 @@ export function observeRecentEntries(
   return onSnapshot(
     q,
     (snap) => {
-      const rows = snap.docs.map((d) => {
-        const x = d.data()
-        const lines =
-          (x['lines'] as { accountId: string; side: string; categoryId?: string | null }[] | undefined) ?? []
-        const debitLine = lines.find((l) => l.side === 'debit')
-        const creditLine = lines.find((l) => l.side === 'credit')
-        return {
-          entryId: d.id,
-          kind: (x['kind'] as string | undefined) ?? 'expense',
-          bookedAt: (x['bookedAt'] as string | undefined) ?? '',
-          amountMinor: (x['amountMinor'] as number | undefined) ?? 0,
-          description: (x['description'] as string | undefined) ?? '',
-          scope: (x['scope'] as EntryView['scope'] | undefined) ?? 'personal',
-          categoryId: debitLine?.accountId ?? null,
-          fromAccountId: creditLine?.accountId ?? null,
-          status: (x['status'] as string | undefined) ?? 'posted',
-          fromCache: snap.metadata.fromCache,
-        }
-      })
-      cb(rows, snap.metadata.fromCache)
+      cb(snap.docs.map(toEntryView(snap.metadata.fromCache)), snap.metadata.fromCache)
     },
     onError,
   )
+}
+
+/**
+ * كل القيود — للتقارير.
+ *
+ * بلا ترقيم صفحات عمدًا في هذه المرحلة: نظام شخصي بعشرات العمليات شهريًا،
+ * وقراءة بضع مئات المستندات أرخص وأبسط من تجميع مسبق يحتاج إعادة بناء عند كل
+ * تصحيح. يُستبدل بـ monthlySummaries حين تتجاوز العمليات بضعة آلاف.
+ */
+export function observeAllEntries(
+  uid: string,
+  cb: (entries: EntryView[]) => void,
+  onError: (e: unknown) => void,
+  firestore: Firestore = db,
+): () => void {
+  const q = query(
+    collection(firestore, path(uid, 'journalEntries')),
+    where('status', '==', 'posted'),
+    orderBy('bookedAtTs', 'desc'),
+    limit(2000),
+  )
+  return onSnapshot(
+    q,
+    (snap) => {
+      cb(snap.docs.map(toEntryView(snap.metadata.fromCache)))
+    },
+    onError,
+  )
+}
+
+/** محوّل واحد من مستند Firestore إلى عرض القيد — لا يُكرَّر بين الاشتراكات. */
+function toEntryView(fromCache: boolean) {
+  return (d: QueryDocumentSnapshot): EntryView => {
+    const x = d.data()
+    const lines =
+      (x['lines'] as { accountId: string; side: string; categoryId?: string | null }[] | undefined) ?? []
+    const debitLine = lines.find((l) => l.side === 'debit')
+    const creditLine = lines.find((l) => l.side === 'credit')
+    return {
+      entryId: d.id,
+      kind: (x['kind'] as string | undefined) ?? 'expense',
+      bookedAt: (x['bookedAt'] as string | undefined) ?? '',
+      amountMinor: (x['amountMinor'] as number | undefined) ?? 0,
+      description: (x['description'] as string | undefined) ?? '',
+      scope: (x['scope'] as EntryView['scope'] | undefined) ?? 'personal',
+      categoryId: debitLine?.accountId ?? null,
+      fromAccountId: creditLine?.accountId ?? null,
+      status: (x['status'] as string | undefined) ?? 'posted',
+      fromCache,
+    }
+  }
 }
 
 /**

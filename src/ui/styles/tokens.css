@@ -62,8 +62,9 @@
   --surface-sunken: var(--color-gray-100);
   --surface-hover: var(--color-gray-100);
 
-  --border-subtle: var(--color-gray-200);
-  --border-strong: var(--color-gray-300);
+  /* شبه معدوم: الظلّ هو ما يفصل البطاقة عن الصفحة، لا الخط. */
+  --border-subtle: rgb(15 15 30 / 0.06);
+  --border-strong: var(--color-gray-200);
 
   --text-primary: var(--color-gray-900);
   --text-secondary: var(--color-gray-600);
@@ -98,10 +99,14 @@
   --fin-transfer-bg: #eaedf3;
   --fin-transfer-border: #c6cad7;
 
-  --shadow-color: 23 17 62;
-  --shadow-sm: 0 1px 2px rgb(var(--shadow-color) / 0.06);
-  --shadow-md: 0 4px 12px rgb(var(--shadow-color) / 0.08);
-  --shadow-lg: 0 12px 32px rgb(var(--shadow-color) / 0.12);
+  /* ظلّ من طبقتين: قريبة حادّة تُثبّت الحافة، وبعيدة ناعمة واسعة تَرفع.
+     الصبغة رمادية دافئة لا أسود صرف، وإلا بدا الظلّ جامدًا.
+     والحدّ شبه معدوم عمدًا: الحدّ الرمادي الصريح يجعل البطاقة تبدو
+     مقصوصةً وملصوقةً على الصفحة بدل أن تذوب فيها. (درس BrandZo 2026-07-30) */
+  --shadow-color: 20 20 40;
+  --shadow-sm: 0 1px 2px rgb(var(--shadow-color) / 0.04);
+  --shadow-md: 0 1px 3px rgb(var(--shadow-color) / 0.04), 0 6px 16px rgb(var(--shadow-color) / 0.05);
+  --shadow-lg: 0 2px 6px rgb(var(--shadow-color) / 0.06), 0 14px 32px rgb(23 17 62 / 0.1);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -207,4 +212,23 @@
   --shadow-sm: 0 1px 2px rgb(var(--shadow-color) / 0.4);
   --shadow-md: 0 4px 12px rgb(var(--shadow-color) / 0.5);
   --shadow-lg: 0 12px 32px rgb(var(--shadow-color) / 0.6);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   مفردات موحَّدة مع مشروع BrandZo — أسماء مرادفة لا طبقة ثانية.
+   الفائدة عملية: الانتقال بين المشروعين لا يتطلب إعادة تعلّم المفردات،
+   و«البطاقة» تعني الشيء نفسه هنا وهناك.
+   ══════════════════════════════════════════════════════════════════ */
+:root {
+  --surface: var(--surface-card);
+  --surface-2: var(--surface-hover);
+  --line: var(--border-subtle);
+  --line-strong: var(--border-strong);
+  --ink: var(--text-primary);
+  --ink-2: var(--text-secondary);
+  --muted: var(--text-muted);
+  --chip: color-mix(in oklab, var(--accent) 6%, transparent);
+
+  --radius-card: 1rem;
+  --radius-chip: 9999px;
 }

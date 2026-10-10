@@ -1,63 +1,35 @@
 import { useEffect, useState } from 'react'
 
-import {
-  ensureSeedAccounts,
-  observeAccounts,
-  observeRecentEntries,
-  type AccountView,
-  type EntryView,
-} from '@/data/repos/ledgerRepo'
+import { observeRecentEntries, type AccountView, type EntryView } from '@/data/repos/ledgerRepo'
 import { computeSummary, expensesByCategory } from '@/data/repos/summary'
 import { formatLYD, unsafeMinor } from '@/domain/money'
 import { kindLabel, type OpKind } from '@/domain/ops/plan'
 import { OperationForm } from '@/features/operations/OperationForm'
 
-export function Dashboard({ uid }: { uid: string }): React.ReactElement {
-  const [accounts, setAccounts] = useState<AccountView[] | null>(null)
+export function Dashboard({
+  uid,
+  accounts,
+}: {
+  uid: string
+  accounts: readonly AccountView[]
+}): React.ReactElement {
   const [entries, setEntries] = useState<EntryView[]>([])
   const [stale, setStale] = useState(false)
   const [fatal, setFatal] = useState<string | null>(null)
-  const [seeding, setSeeding] = useState(true)
 
   useEffect(() => {
-    let cancelled = false
-    const run = async (): Promise<void> => {
-      try {
-        await ensureSeedAccounts(uid)
-      } catch (e: unknown) {
-        if (!cancelled) setFatal(describe(e))
-      }
-      if (!cancelled) setSeeding(false)
-    }
-    void run()
-    return () => {
-      cancelled = true
-    }
-  }, [uid])
-
-  useEffect(() => {
-    const off1 = observeAccounts(
+    const off2 = observeRecentEntries(
       uid,
+      30,
       (rows, fromCache) => {
-        setAccounts(rows)
+        setEntries(rows)
         setStale(fromCache)
       },
       (e) => {
         setFatal(describe(e))
       },
     )
-    const off2 = observeRecentEntries(
-      uid,
-      30,
-      (rows) => {
-        setEntries(rows)
-      },
-      (e) => {
-        setFatal(describe(e))
-      },
-    )
     return () => {
-      off1()
       off2()
     }
   }, [uid])
@@ -78,7 +50,7 @@ export function Dashboard({ uid }: { uid: string }): React.ReactElement {
     )
   }
 
-  if (accounts === null || seeding) {
+  if (accounts.length === 0) {
     return (
       <p className="py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
         جارٍ تجهيز حساباتك…

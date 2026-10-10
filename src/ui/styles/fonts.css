@@ -1,0 +1,83 @@
+/* =========================================================================
+   الخط الرسمي: IBM Plex Sans Arabic — مستضاف ذاتيًا.
+
+   **لماذا هذا الخط:** مصمَّم أصلًا لواجهات المؤسسات (نظام IBM Carbon)،
+   ولاتينيّته من نفس العائلة — فتتجانس المبالغ اللاتينية (1,250.500) مع النص
+   العربي في الجدول الواحد بلا نشاز. وهذا شرط عملي في «رصيد» لأن ق-3 يفرض
+   أرقامًا لاتينية داخل نص عربي في كل شاشة.
+
+   **لماذا استضافة ذاتية لا Google Fonts:** التطبيق PWA يعمل دون اتصال، ولا
+   يجوز ربط رسم الواجهة بخادم خارجي — وإلا ظهر نصّ بلا خط عند ضعف الشبكة،
+   وتسرّبت زيارة لكل فتح. (نفس القرار المعتمد في مشروع BrandZo منذ 2026-07-29،
+   والملفات منقولة منه.)
+
+   **تقسيم unicode-range:** مجموعتان لكل وزن (عربي + لاتيني) فيحمّل المتصفح
+   ما يلزم فقط. المجموع 228KB لكل الأوزان، والصفحة الواحدة تحمّل جزءًا منه.
+
+   **ملاحظة على الأوزان:** الوزنان 500 و600 لهما ملف عربي فقط. لم يُعلَن لهما
+   لاتيني عمدًا: مطابقة الخطوط في CSS ستختار 700 لأي وزن ≥600 و400 لما دونه،
+   فتبقى الأرقام من نفس العائلة. إعلان وزن بلا ملف كان سيُسقط الأرقام إلى
+   خط النظام فيظهر الرقم بعائلة مختلفة داخل الصف الواحد.
+   ========================================================================= */
+
+/* ── 400 عادي ── */
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/plex-arabic-400-arabic.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08E3-08FF, U+200C-200E, U+2010-2011,
+    U+FB50-FDFF, U+FE70-FEFC;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/plex-arabic-400-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2212, U+20AC, U+2122, U+FEFF,
+    U+FFFD;
+}
+
+/* ── 500 متوسط — تسميات الحقول ورؤوس الجداول ── */
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/plex-arabic-500-arabic.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08E3-08FF, U+200C-200E, U+2010-2011,
+    U+FB50-FDFF, U+FE70-FEFC;
+}
+
+/* ── 600 شبه عريض — عناوين الأقسام ── */
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/plex-arabic-600-arabic.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08E3-08FF, U+200C-200E, U+2010-2011,
+    U+FB50-FDFF, U+FE70-FEFC;
+}
+
+/* ── 700 عريض — العناوين والمجاميع ── */
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/plex-arabic-700-arabic.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08E3-08FF, U+200C-200E, U+2010-2011,
+    U+FB50-FDFF, U+FE70-FEFC;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/plex-arabic-700-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2212, U+20AC, U+2122, U+FEFF,
+    U+FFFD;
+}

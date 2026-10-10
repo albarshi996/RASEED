@@ -12,6 +12,7 @@
 
 import { accountTypeOf, normalSideOf, type AccountType } from '@/domain/ledger/chartOfAccounts'
 import { MAX_ABS_MINOR, type Minor } from '@/domain/money'
+import { type SettlementRequest } from '@/domain/ledger/settlement'
 import { isValidISODate, periodKeyOf, type ISODate, type PeriodKey } from '@/lib/time'
 
 export type Scope = 'personal' | 'household'
@@ -48,6 +49,8 @@ export interface OperationRequest {
   scope?: Scope
   counterpartyName?: string
   tags?: readonly string[]
+  /** ربط العملية بدين أو التزام — يُحدَّث سجله في نفس المعاملة. */
+  settlement?: SettlementRequest
 }
 
 /** قيود كل عملية: أي أنواع حسابات يُسمح بها على كل طرف. */
@@ -116,6 +119,7 @@ export interface OperationPlan {
   tags: readonly string[]
   scope: Scope
   counterpartyName: string | null
+  settlement: SettlementRequest | null
   lines: readonly PlannedLine[]
   accountIds: readonly string[]
   accountTypes: readonly AccountType[]
@@ -222,7 +226,8 @@ export function planOperation(
       signedAmountMinor: amount,
       scope,
       categoryId: debitType === 'expense' ? debit.accountId : null,
-      settlementDeltaMinor: 0,
+      // ADR-021: مجموع هذا الحقل على الدفتر = المبلغ المسدَّد، وهو المصدر المستقل للتحقق.
+      settlementDeltaMinor: req.settlement !== undefined ? amount : 0,
     },
     {
       lineNo: 1,
@@ -277,6 +282,7 @@ export function planOperation(
       tags: req.tags ?? [],
       scope,
       counterpartyName: req.counterpartyName?.trim() ? req.counterpartyName.trim() : null,
+      settlement: req.settlement ?? null,
       lines,
       accountIds: lines.map((l) => l.accountId),
       accountTypes: lines.map((l) => l.accountType),

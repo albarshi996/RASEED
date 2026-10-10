@@ -6,6 +6,7 @@ import {
   type DomainError,
   type OperationRequest,
 } from '@/domain/ops/plan'
+import { checkSettlement, type SettlementTarget } from '@/domain/ledger/settlement'
 import { libyaDateToUtcMs, today } from '@/lib/time'
 
 import { db } from '../firebase/app'
@@ -80,9 +81,65 @@ export async function postOperation(
       )
       const periodSnaps = await Promise.all(periodRefs.map((r) => tx.get(r)))
 
+      // التسوية: تُقرأ ضمن قراءات المعاملة ثم تُحدَّث معها ذرّيًا.
+      // لو حُدِّثت خارجها لأمكن أن يُسجَّل القيد ويفشل تحديث الدين، فينحرف السجلّان.
+      let settlementRef: ReturnType<typeof doc> | null = null
+      let settlementNext: Record<string, unknown> | null = null
+      if (plan.settlement !== null) {
+        const isDebt = plan.settlement.kind === 'debt'
+        settlementRef = doc(
+          firestore,
+          p(uid, `${isDebt ? 'debts' : 'obligations'}/${plan.settlement.id}`),
+        )
+        const snap = await tx.get(settlementRef)
+        if (!snap.exists()) {
+          throw new DomainRejection({
+            code: 'ACCOUNT_MISSING',
+            message: isDebt ? 'الدين غير موجود.' : 'الالتزام غير موجود.',
+          })
+        }
+        const d = snap.data()
+        const target: SettlementTarget = {
+          kind: plan.settlement.kind,
+          id: plan.settlement.id,
+          remainingMinor: d['remainingMinor'] as number,
+          label: (d['name'] as string | undefined) ?? (d['counterpartyName'] as string | undefined) ?? 'السجل',
+        }
+        const check = checkSettlement(req.amountMinor, target)
+        if (!check.ok) {
+          throw new DomainRejection({ code: 'OVERPAYMENT', message: check.message })
+        }
+
+        if (isDebt) {
+          const settled = (d['settledMinor'] as number) + plan.amountMinor
+          const remaining = (d['principalMinor'] as number) - settled - (d['writtenOffMinor'] as number)
+          settlementNext = {
+            settledMinor: settled,
+            remainingMinor: remaining,
+            status: remaining === 0 ? 'settled' : 'open',
+            lastPaymentAt: plan.bookedAt,
+            updatedAt: serverTimestamp(),
+          }
+        } else {
+          const paid = (d['paidMinor'] as number) + plan.amountMinor
+          const remaining =
+            (d['totalMinor'] as number) + (d['extraChargesMinor'] as number) - paid
+          settlementNext = {
+            paidMinor: paid,
+            remainingMinor: remaining,
+            status: remaining === 0 ? 'paid' : 'partiallyPaid',
+            lastPaymentAt: plan.bookedAt,
+            updatedAt: serverTimestamp(),
+          }
+        }
+      }
+
       const bookedAtTs = libyaDateToUtcMs(plan.bookedAt)
       const refs: Record<string, string> = {}
       if (plan.counterpartyName !== null) refs['counterpartyName'] = plan.counterpartyName
+      if (plan.settlement !== null) {
+        refs[plan.settlement.kind === 'debt' ? 'debtId' : 'obligationId'] = plan.settlement.id
+      }
 
       tx.set(entryRef, {
         opId: plan.opId,
@@ -166,6 +223,10 @@ export async function postOperation(
           updatedAt: serverTimestamp(),
         })
       })
+
+      if (settlementRef !== null && settlementNext !== null) {
+        tx.update(settlementRef, settlementNext)
+      }
 
       return plan.entryId
     })

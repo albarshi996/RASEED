@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react'
 
 import { connectEmulatorsOnce } from '@/data/firebase/app'
-import { observeSession, signOut, type SessionUser } from '@/data/firebase/auth'
-import { Dashboard } from '@/features/dashboard/Dashboard'
+import { observeSession, type SessionUser } from '@/data/firebase/auth'
+import { ensureSeedAccounts, observeAccounts, type AccountView } from '@/data/repos/ledgerRepo'
 import { SignInScreen } from '@/features/auth/SignInScreen'
+import { AccountsScreen } from '@/features/accounts/AccountsScreen'
+import { DebtsScreen, ErrorBox, Loading } from '@/features/commitments/DebtsScreen'
+import { ObligationsScreen } from '@/features/commitments/ObligationsScreen'
+import { Dashboard } from '@/features/dashboard/Dashboard'
+import { ReportsScreen } from '@/features/reports/ReportsScreen'
 import { env } from '@/lib/env'
-import { today } from '@/lib/time'
+
+import { AppShell, type Route } from './AppShell'
 
 type SessionState = { status: 'loading' } | { status: 'out' } | { status: 'in'; user: SessionUser }
 
@@ -19,69 +25,89 @@ export function App(): React.ReactElement {
     })
   }, [])
 
-  if (session.status === 'loading') return <Splash />
+  if (session.status === 'loading') {
+    return (
+      <main className="grid min-h-dvh place-items-center">
+        <p className="text-sm" style={{ color: 'var(--muted)' }}>
+          جارٍ التحقّق من الجلسة…
+        </p>
+      </main>
+    )
+  }
   if (session.status === 'out') return <SignInScreen />
-  return <Shell user={session.user} />
-}
-
-function Splash(): React.ReactElement {
-  return (
-    <main className="grid min-h-dvh place-items-center">
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        جارٍ التحقّق من الجلسة…
-      </p>
-    </main>
-  )
+  return <SignedIn user={session.user} />
 }
 
 /**
- * هيكل مؤقت لما بعد تسجيل الدخول.
+ * الحسابات تُحمَّل **مرة واحدة هنا** وتُمرَّر لكل الشاشات.
  *
- * يعرض لوحة التحكم الحقيقية: الأرصدة من Firestore، ونموذج تسجيل المصروف،
- * وآخر العمليات. لا رقم واحد مُختلَق — كل مبلغ مشتق من قيود فعلية.
+ * السبب ليس الأداء وحده: اشتراك منفصل في كل شاشة يعني أن رصيدًا تغيّر قد يظهر
+ * محدَّثًا في شاشة وقديمًا في أخرى خلال اللحظة نفسها — وهو أسوأ من بطء.
  */
-function Shell({ user }: { user: SessionUser }): React.ReactElement {
+function SignedIn({ user }: { user: SessionUser }): React.ReactElement {
+  const [route, setRoute] = useState<Route>('dashboard')
+  const [accounts, setAccounts] = useState<AccountView[] | null>(null)
+  const [fatal, setFatal] = useState<string | null>(null)
+  const [seeding, setSeeding] = useState(true)
+
   const isOwner = env.VITE_OWNER_UID === '' || user.uid === env.VITE_OWNER_UID
 
+  useEffect(() => {
+    let cancelled = false
+    const run = async (): Promise<void> => {
+      try {
+        await ensureSeedAccounts(user.uid)
+      } catch (e: unknown) {
+        if (!cancelled) setFatal(describe(e))
+      }
+      if (!cancelled) setSeeding(false)
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [user.uid])
+
+  useEffect(() => {
+    return observeAccounts(
+      user.uid,
+      (rows) => { setAccounts(rows) },
+      (e) => { setFatal(describe(e)) },
+    )
+  }, [user.uid])
+
   return (
-    <div className="min-h-dvh">
-      <header
-        className="flex items-center justify-between border-b px-5 py-4"
-        style={{ background: 'var(--surface-card)', borderColor: 'var(--border-subtle)' }}
-      >
-        <div>
-          <h1 className="text-lg font-bold">رَصيد</h1>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            {today()}
-          </p>
+    <AppShell user={user} route={route} onRoute={setRoute}>
+      {!isOwner && (
+        <div className="mb-5">
+          <ErrorBox message="هذا الحساب غير معتمد للوصول إلى بيانات «رصيد». قواعد الأمان سترفض أي قراءة أو كتابة." />
         </div>
-        <button
-          type="button"
-          onClick={() => void signOut()}
-          className="rounded-lg border px-3 py-1.5 text-xs font-medium"
-          style={{ borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' }}
-        >
-          خروج
-        </button>
-      </header>
+      )}
 
-      <main className="mx-auto max-w-3xl px-5 py-8">
-        {!isOwner && (
-          <p
-            role="alert"
-            className="mb-6 rounded-xl border p-4 text-sm leading-relaxed"
-            style={{
-              background: 'var(--fin-expense-bg)',
-              borderColor: 'var(--fin-expense-border)',
-              color: 'var(--fin-expense)',
-            }}
-          >
-            هذا الحساب غير معتمد للوصول إلى بيانات «رصيد». قواعد الأمان سترفض أي قراءة أو كتابة.
-          </p>
-        )}
-
-        <Dashboard uid={user.uid} />
-      </main>
-    </div>
+      {fatal !== null ? (
+        <ErrorBox message={fatal} />
+      ) : accounts === null || seeding ? (
+        <Loading />
+      ) : (
+        <>
+          {route === 'dashboard' && <Dashboard uid={user.uid} accounts={accounts} />}
+          {route === 'obligations' && <ObligationsScreen uid={user.uid} accounts={accounts} />}
+          {route === 'debts' && <DebtsScreen uid={user.uid} accounts={accounts} />}
+          {route === 'accounts' && <AccountsScreen uid={user.uid} accounts={accounts} />}
+          {route === 'reports' && <ReportsScreen uid={user.uid} accounts={accounts} />}
+        </>
+      )}
+    </AppShell>
   )
+}
+
+function describe(e: unknown): string {
+  const code = typeof e === 'object' && e !== null && 'code' in e ? String(e.code) : ''
+  if (code === 'permission-denied') {
+    return 'رفض الخادم القراءة. تأكّد أن حسابك هو المالك المعتمد وأن القواعد منشورة.'
+  }
+  if (code === 'failed-precondition') {
+    return 'الاستعلام يحتاج فهرسًا لم يُنشر بعد. شغّل: npm run deploy:rules'
+  }
+  return 'تعذّر تحميل البيانات. تحقّق من الاتصال.'
 }
