@@ -1,12 +1,11 @@
 import { doc, getDoc, runTransaction, serverTimestamp, type Firestore } from 'firebase/firestore'
 
-import { SEED_ACCOUNTS } from '@/domain/ledger/chartOfAccounts'
 import {
-  planExpense,
+  planOperation,
   type AccountSnapshot,
   type DomainError,
-  type ExpenseRequest,
-} from '@/domain/ops/planExpense'
+  type OperationRequest,
+} from '@/domain/ops/plan'
 import { libyaDateToUtcMs, today } from '@/lib/time'
 
 import { db } from '../firebase/app'
@@ -14,37 +13,32 @@ import { db } from '../firebase/app'
 /**
  * **نقطة الكتابة المالية الوحيدة في النظام.**
  *
- * كل حركة مالية تمرّ من هنا. أي كتابة مباشرة على `journalEntries` أو `accounts`
- * من أي مكان آخر تلتفّ على الحوارس وتكسر الأرصدة — ولذلك لا تُصدَّر أدوات كتابة أخرى.
+ * كل عملية — مصروف، دخل، تحويل، اقتراض، إقراض، تحصيل، سداد، رصيد افتتاحي — تمرّ من هنا.
+ * أي كتابة مباشرة على `journalEntries` أو `accounts` من أي مكان آخر تلتفّ على الحوارس
+ * وتكسر الأرصدة، ولذلك لا تُصدَّر أدوات كتابة أخرى من هذه الطبقة.
  *
- * **لماذا `runTransaction` لا `writeBatch`:** القرار (هل يكفي الرصيد؟ ما قيمة المجمَّع
- * الجديد؟) يعتمد على قيم مقروءة، ويجب أن تُقرأ **خادميًا** وأن تُجهَض العملية إن تغيّرت
- * بين القراءة والالتزام. `writeBatch` لا يعطي ذلك.
+ * **`runTransaction` لا `writeBatch`:** القرار (هل يكفي الرصيد؟ ما قيمة المجمَّع الجديد؟)
+ * يعتمد على قيم مقروءة، ويجب أن تُقرأ خادميًا وأن تُجهَض العملية إن تغيّرت بين القراءة
+ * والالتزام. ولهذا تحديدًا تفشل العمليات المالية دون اتصال بدل أن تعمل على بيانات قديمة.
  *
- * **دالة المعاملة نقية وقابلة لإعادة التنفيذ:** Firestore قد تعيد تشغيلها عدة مرات عند
- * التنافس. لذلك لا أثر جانبي داخلها، وكل القيم تُشتق من القراءات الطازجة في المحاولة الحالية.
- *
- * **منع الازدواج:** `entryId === opId` ومعرّف المستند هو نفسه. ضغط الزر مرتين أو إعادة
- * المحاولة بعد انقطاع يكتبان نفس المستند، فلا تتضاعف الحركة (ADR-004).
+ * **دالة المعاملة نقية:** Firestore قد تعيد تشغيلها عند التنافس، فلا أثر جانبي داخلها
+ * وكل القيم مشتقة من قراءات المحاولة الحالية.
  */
 
-export type PostResult =
-  | { ok: true; entryId: string }
-  | { ok: false; error: DomainError }
-  | { ok: false; error: { code: 'DUPLICATE'; message: string } }
-  | { ok: false; error: { code: 'OFFLINE' | 'PERMISSION' | 'UNKNOWN'; message: string } }
+export type PostError = DomainError | { code: 'DUPLICATE' | 'OFFLINE' | 'PERMISSION' | 'UNKNOWN'; message: string }
+export type PostResult = { ok: true; entryId: string } | { ok: false; error: PostError }
 
-const userPath = (uid: string, rest: string): string => `users/${uid}/${rest}`
+const p = (uid: string, rest: string): string => `users/${uid}/${rest}`
 
-export async function postExpense(
+export async function postOperation(
   uid: string,
-  req: ExpenseRequest,
+  req: OperationRequest,
   firestore: Firestore = db,
 ): Promise<PostResult> {
-  const entryRef = doc(firestore, userPath(uid, `journalEntries/${req.opId}`))
+  const entryRef = doc(firestore, p(uid, `journalEntries/${req.opId}`))
 
-  // فحص مبكر للازدواج خارج المعاملة: أرخص وأوضح رسالةً من الاعتماد على فشل الكتابة.
-  // ليس ضمانًا — الضمان في معرّف المستند نفسه داخل المعاملة.
+  // فحص مبكر للازدواج: رسالة أوضح من فشل كتابة. ليس ضمانًا —
+  // الضمان أن معرّف المستند هو opId نفسه، فالكتابة الثانية تستبدل لا تضاعف.
   const existing = await getDoc(entryRef).catch(() => null)
   if (existing?.exists() === true) {
     return { ok: false, error: { code: 'DUPLICATE', message: 'هذه العملية مسجَّلة بالفعل.' } }
@@ -52,13 +46,13 @@ export async function postExpense(
 
   try {
     const entryId = await runTransaction(firestore, async (tx) => {
-      const fromRef = doc(firestore, userPath(uid, `accounts/${req.fromAccountId}`))
-      const catRef = doc(firestore, userPath(uid, `accounts/${req.categoryAccountId}`))
+      const debitRef = doc(firestore, p(uid, `accounts/${req.debitAccountId}`))
+      const creditRef = doc(firestore, p(uid, `accounts/${req.creditAccountId}`))
 
       // كل القراءات أولًا — Firestore يمنع القراءة بعد الكتابة داخل المعاملة.
-      const [fromSnap, catSnap] = await Promise.all([tx.get(fromRef), tx.get(catRef)])
+      const [debitSnap, creditSnap] = await Promise.all([tx.get(debitRef), tx.get(creditRef)])
 
-      const toSnapshot = (s: typeof fromSnap): AccountSnapshot | undefined => {
+      const toSnapshot = (s: typeof debitSnap): AccountSnapshot | undefined => {
         if (!s.exists()) return undefined
         const d = s.data()
         return {
@@ -66,23 +60,29 @@ export async function postExpense(
           type: d['type'] as AccountSnapshot['type'],
           balanceMinor: d['balanceMinor'] as number,
           minBalanceMinor: d['minBalanceMinor'] as number,
-          balanceVersion: d['balanceVersion'] as number,
           status: d['status'] as AccountSnapshot['status'],
+          isCashLike: (d['isCashLike'] as boolean | undefined) ?? false,
         }
       }
 
-      const planned = planExpense(req, { from: toSnapshot(fromSnap), category: toSnapshot(catSnap) }, today())
+      const planned = planOperation(
+        req,
+        { debit: toSnapshot(debitSnap), credit: toSnapshot(creditSnap) },
+        today(),
+      )
       if (!planned.ok) throw new DomainRejection(planned.error)
       const plan = planned.plan
 
-      // المجمَّعات الشهرية تُقرأ لحساب قيمها المطلقة الجديدة: القواعد ترفض تراجع الحركة،
-      // و increment() ليست عديمة التكرار فلا تصلح هنا.
+      // المجمَّعات الشهرية تُقرأ لحساب قيمها المطلقة: القواعد ترفض تراجع الحركة،
+      // و increment() ليست عديمة التكرار فلا تصلح داخل معاملة قد تُعاد.
       const periodRefs = plan.deltas.map((d) =>
-        doc(firestore, userPath(uid, `accountPeriods/${d.accountId}__${plan.periodKey}`)),
+        doc(firestore, p(uid, `accountPeriods/${d.accountId}__${plan.periodKey}`)),
       )
       const periodSnaps = await Promise.all(periodRefs.map((r) => tx.get(r)))
 
       const bookedAtTs = libyaDateToUtcMs(plan.bookedAt)
+      const refs: Record<string, string> = {}
+      if (plan.counterpartyName !== null) refs['counterpartyName'] = plan.counterpartyName
 
       tx.set(entryRef, {
         opId: plan.opId,
@@ -96,7 +96,7 @@ export async function postExpense(
         schemaVersion: 1,
         description: plan.description,
         tags: plan.tags,
-        refs: plan.payeeName === null ? {} : { payeeName: plan.payeeName },
+        refs,
         scope: plan.scope,
         lines: plan.lines,
         accountIds: plan.accountIds,
@@ -104,13 +104,13 @@ export async function postExpense(
         totalDebitMinor: plan.totalDebitMinor,
         totalCreditMinor: plan.totalCreditMinor,
         amountMinor: plan.amountMinor,
-        payloadHash: hash64(plan),
+        payloadHash: payloadHash(plan),
         createdAt: serverTimestamp(),
         createdBy: uid,
       })
 
       for (const line of plan.lines) {
-        tx.set(doc(firestore, userPath(uid, `postings/${plan.entryId}__${String(line.lineNo)}`)), {
+        tx.set(doc(firestore, p(uid, `postings/${plan.entryId}__${String(line.lineNo)}`)), {
           ownerUid: uid,
           entryId: plan.entryId,
           lineNo: line.lineNo,
@@ -130,23 +130,30 @@ export async function postExpense(
       }
 
       plan.deltas.forEach((delta, i) => {
-        const snap = i === 0 ? catSnap : fromSnap
-        const ref = i === 0 ? catRef : fromRef
-        const cur = snap.data() ?? {}
+        const isDebitLeg = delta.accountId === req.debitAccountId
+        const snap = isDebitLeg ? debitSnap : creditSnap
+        const ref = isDebitLeg ? debitRef : creditRef
+        const cur = snap.data()
+        if (cur === undefined) throw new Error('ACCOUNT_VANISHED')
+
         tx.update(ref, {
           debitTotalMinor: (cur['debitTotalMinor'] as number) + delta.debitMinor,
           creditTotalMinor: (cur['creditTotalMinor'] as number) + delta.creditMinor,
           balanceMinor: (cur['balanceMinor'] as number) + delta.balanceDeltaMinor,
+          openingBalanceMinor:
+            plan.kind === 'opening' && isDebitLeg
+              ? (cur['openingBalanceMinor'] as number) + plan.amountMinor
+              : (cur['openingBalanceMinor'] as number),
           entryCount: (cur['entryCount'] as number) + 1,
           balanceVersion: (cur['balanceVersion'] as number) + 1,
           earmarkedMinor: cur['earmarkedMinor'] as number,
           updatedAt: serverTimestamp(),
         })
 
-        const ps = periodSnaps[i]
         const periodRef = periodRefs[i]
-        if (periodRef === undefined) throw new Error('مرجع فترة مفقود — عيب برمجي')
-        const prev = ps?.exists() === true ? ps.data() : undefined
+        if (periodRef === undefined) throw new Error('PERIOD_REF_MISSING')
+        const periodSnap = periodSnaps[i]
+        const prev = periodSnap?.exists() === true ? periodSnap.data() : undefined
         const debitMinor = ((prev?.['debitMinor'] as number | undefined) ?? 0) + delta.debitMinor
         const creditMinor = ((prev?.['creditMinor'] as number | undefined) ?? 0) + delta.creditMinor
         tx.set(periodRef, {
@@ -182,16 +189,13 @@ class DomainRejection extends Error {
 function classify(err: unknown): { code: 'OFFLINE' | 'PERMISSION' | 'UNKNOWN'; message: string } {
   const code = typeof err === 'object' && err !== null && 'code' in err ? String(err.code) : ''
   if (code === 'permission-denied') {
-    return {
-      code: 'PERMISSION',
-      message: 'رفض الخادم العملية. تأكّد أن حسابك هو المالك المعتمد وأن القواعد منشورة.',
-    }
+    return { code: 'PERMISSION', message: 'رفض الخادم العملية. تأكّد أن حسابك هو المالك المعتمد.' }
   }
-  if (code === 'unavailable' || code === 'failed-precondition' || code === 'deadline-exceeded') {
+  if (code === 'unavailable' || code === 'deadline-exceeded') {
     return {
       code: 'OFFLINE',
       message:
-        'تعذّر إتمام العملية — العمليات المالية تتطلب اتصالًا بالإنترنت ولم تُحفَظ. تحقّق من الاتصال وأعد المحاولة.',
+        'تعذّر إتمام العملية — العمليات المالية تتطلب اتصالًا ولم يُحفَظ شيء. تحقّق من الاتصال وأعد المحاولة.',
     }
   }
   return { code: 'UNKNOWN', message: 'تعذّر حفظ العملية. لم يُسجَّل شيء. حاول مرة أخرى.' }
@@ -199,15 +203,16 @@ function classify(err: unknown): { code: 'OFFLINE' | 'PERMISSION' | 'UNKNOWN'; m
 
 /**
  * بصمة الحمولة — تكشف «نفس opId بحمولة مختلفة»، وهو عيب برمجي لا تكرار عادي.
- * ليست أمنية، فلا تحتاج تجزئة تعمية؛ المطلوب حتمية وطول ثابت 64 كما تفرض القواعد.
+ * ليست أمنية فلا تحتاج تجزئة تعمية؛ المطلوب حتمية وطول 64 كما تفرض القواعد.
  */
-function hash64(plan: {
+function payloadHash(plan: {
   opId: string
+  kind: string
   amountMinor: number
   bookedAt: string
   accountIds: readonly string[]
 }): string {
-  const input = `${plan.opId}|${String(plan.amountMinor)}|${plan.bookedAt}|${plan.accountIds.join(',')}`
+  const input = `${plan.opId}|${plan.kind}|${String(plan.amountMinor)}|${plan.bookedAt}|${plan.accountIds.join(',')}`
   let h1 = 0x811c9dc5
   let h2 = 0x01000193
   for (let i = 0; i < input.length; i++) {
@@ -218,6 +223,3 @@ function hash64(plan: {
   const part = (n: number): string => n.toString(16).padStart(8, '0')
   return (part(h1) + part(h2) + part(h1 ^ h2) + part((h1 + h2) >>> 0)).padEnd(64, '0').slice(0, 64)
 }
-
-/** الحسابات المطلوب إنشاؤها عند أول تسجيل دخول. */
-export { SEED_ACCOUNTS }

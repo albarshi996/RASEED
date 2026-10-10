@@ -1,25 +1,21 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 
-import { postExpense } from '@/data/ledger/postExpense'
 import {
-  availableCashMinor,
   ensureSeedAccounts,
   observeAccounts,
   observeRecentEntries,
-  totalExpensesMinor,
   type AccountView,
   type EntryView,
 } from '@/data/repos/ledgerRepo'
-import { OpeningBalanceCard } from '@/features/accounts/OpeningBalanceCard'
-import { AddExpenseForm } from '@/features/expenses/AddExpenseForm'
-import { formatLYD, type Minor } from '@/domain/money'
-import { type ExpenseRequest } from '@/domain/ops/planExpense'
+import { computeSummary, expensesByCategory } from '@/data/repos/summary'
+import { formatLYD, unsafeMinor } from '@/domain/money'
+import { kindLabel, type OpKind } from '@/domain/ops/plan'
+import { OperationForm } from '@/features/operations/OperationForm'
 
 export function Dashboard({ uid }: { uid: string }): React.ReactElement {
   const [accounts, setAccounts] = useState<AccountView[] | null>(null)
   const [entries, setEntries] = useState<EntryView[]>([])
   const [stale, setStale] = useState(false)
-  const [busy, setBusy] = useState(false)
   const [fatal, setFatal] = useState<string | null>(null)
   const [seeding, setSeeding] = useState(true)
 
@@ -52,7 +48,7 @@ export function Dashboard({ uid }: { uid: string }): React.ReactElement {
     )
     const off2 = observeRecentEntries(
       uid,
-      25,
+      30,
       (rows) => {
         setEntries(rows)
       },
@@ -65,19 +61,6 @@ export function Dashboard({ uid }: { uid: string }): React.ReactElement {
       off2()
     }
   }, [uid])
-
-  const submit = useCallback(
-    async (req: ExpenseRequest): Promise<string | null> => {
-      setBusy(true)
-      try {
-        const res = await postExpense(uid, req)
-        return res.ok ? null : res.error.message
-      } finally {
-        setBusy(false)
-      }
-    },
-    [uid],
-  )
 
   if (fatal !== null) {
     return (
@@ -103,8 +86,10 @@ export function Dashboard({ uid }: { uid: string }): React.ReactElement {
     )
   }
 
-  const cash = availableCashMinor(accounts) as Minor
-  const spent = totalExpensesMinor(accounts) as Minor
+  const s = computeSummary(accounts)
+  const byCategory = expensesByCategory(accounts)
+  const maxCategory = byCategory[0]?.amountMinor ?? 1
+  const needsOpening = s.availableCashMinor === 0 && s.totalIncomeMinor === 0
 
   return (
     <div className="space-y-6">
@@ -121,25 +106,68 @@ export function Dashboard({ uid }: { uid: string }): React.ReactElement {
         </p>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <StatCard label="الأموال المتاحة" value={cash} accent="var(--accent)" />
-        <StatCard label="إجمالي المصروفات" value={spent} accent="var(--fin-expense)" />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="الأموال المتاحة" value={s.availableCashMinor} color="var(--accent)" big />
+        <Stat label="صافي الثروة" value={s.netWorthMinor} color="var(--text-primary)" big />
+        <Stat label="مستحق لي" value={s.receivablesMinor} color="var(--fin-receivable)" />
+        <Stat label="مستحق عليّ" value={s.payablesMinor} color="var(--fin-owed)" />
+        <Stat label="إجمالي الدخل" value={s.totalIncomeMinor} color="var(--fin-income)" />
+        <Stat label="إجمالي المصروفات" value={s.totalExpensesMinor} color="var(--fin-expense)" />
+        <Stat
+          label="صافي التدفق"
+          value={s.netFlowMinor}
+          color={s.netFlowMinor >= 0 ? 'var(--fin-income)' : 'var(--fin-expense)'}
+        />
+        <Stat label="عدد العمليات" value={null} text={String(entries.length)} color="var(--text-secondary)" />
       </div>
 
-      {cash === 0 && <OpeningBalanceCard uid={uid} accounts={accounts} />}
+      {needsOpening && (
+        <p
+          className="rounded-xl border px-4 py-3 text-xs leading-relaxed"
+          style={{
+            background: 'var(--surface-warm)',
+            borderColor: 'var(--border-subtle)',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          ابدأ بتسجيل <strong>رصيد افتتاحي</strong> من النموذج أدناه — كم معك الآن فعلًا. بدونه
+          سيُرفض أي مصروف بحجّة عدم كفاية الرصيد، وهو رفض صحيح محاسبيًا.
+        </p>
+      )}
 
-      <AddExpenseForm accounts={accounts} onSubmit={submit} busy={busy} />
+      <OperationForm uid={uid} accounts={accounts} initialKind={needsOpening ? 'opening' : 'expense'} />
 
-      {cash !== 0 && (
-        <details
+      {byCategory.length > 0 && (
+        <section
           className="rounded-2xl border p-5"
           style={{ background: 'var(--surface-card)', borderColor: 'var(--border-subtle)' }}
         >
-          <summary className="cursor-pointer text-sm font-semibold">إضافة رصيد إلى حساب</summary>
-          <div className="mt-4">
-            <OpeningBalanceCard uid={uid} accounts={accounts} />
-          </div>
-        </details>
+          <h2 className="mb-4 text-base font-bold">المصروفات حسب الفئة</h2>
+          <ul className="space-y-2.5">
+            {byCategory.map((c) => (
+              <li key={c.accountId}>
+                <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
+                  <span>{c.name}</span>
+                  <span data-money className="font-semibold" style={{ color: 'var(--fin-expense)' }}>
+                    {formatLYD(unsafeMinor(c.amountMinor))}
+                  </span>
+                </div>
+                <div
+                  className="h-1.5 overflow-hidden rounded-full"
+                  style={{ background: 'var(--surface-sunken)' }}
+                >
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${String(Math.max(2, (c.amountMinor / maxCategory) * 100))}%`,
+                      background: 'var(--fin-expense)',
+                    }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <section
@@ -149,7 +177,7 @@ export function Dashboard({ uid }: { uid: string }): React.ReactElement {
         <h2 className="mb-4 text-base font-bold">آخر العمليات</h2>
         {entries.length === 0 ? (
           <p className="py-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
-            لا توجد عمليات بعد. سجّل أول مصروف من النموذج أعلاه.
+            لا توجد عمليات بعد.
           </p>
         ) : (
           <ul className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
@@ -160,16 +188,12 @@ export function Dashboard({ uid }: { uid: string }): React.ReactElement {
                   <p className="mt-0.5 text-xs" style={{ color: 'var(--text-muted)' }}>
                     <span dir="ltr">{e.bookedAt}</span>
                     {' · '}
-                    {nameOf(accounts, e.categoryId)}
+                    {kindLabel(e.kind as OpKind)}
                     {e.scope === 'household' ? ' · منزلي' : ''}
                   </p>
                 </div>
-                <span
-                  data-money
-                  className="shrink-0 text-sm font-semibold"
-                  style={{ color: 'var(--fin-expense)' }}
-                >
-                  {formatLYD(e.amountMinor as Minor)}
+                <span data-money className="shrink-0 text-sm font-semibold" style={{ color: colorFor(e.kind) }}>
+                  {formatLYD(unsafeMinor(e.amountMinor))}
                 </span>
               </li>
             ))}
@@ -180,39 +204,66 @@ export function Dashboard({ uid }: { uid: string }): React.ReactElement {
   )
 }
 
-function StatCard({
+function Stat({
   label,
   value,
-  accent,
+  color,
+  big = false,
+  text,
 }: {
   label: string
-  value: Minor
-  accent: string
+  value: number | null
+  color: string
+  big?: boolean
+  text?: string
 }): React.ReactElement {
+  const display = value === null ? (text ?? '') : formatLYD(unsafeMinor(value))
   return (
     <div
-      className="rounded-2xl border p-5"
-      style={{ background: 'var(--surface-warm)', borderColor: 'var(--border-subtle)' }}
+      className="rounded-2xl border p-4"
+      style={{
+        background: big ? 'var(--surface-warm)' : 'var(--surface-card)',
+        borderColor: 'var(--border-subtle)',
+      }}
     >
       <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
         {label}
       </p>
-      <p data-money className="mt-2 text-2xl font-bold" style={{ color: accent }} title={formatLYD(value)}>
-        {formatLYD(value)}
+      <p
+        className={`mt-1.5 font-bold ${big ? 'text-xl' : 'text-base'}`}
+        style={{ color }}
+        title={display}
+        {...(value === null ? {} : { 'data-money': true })}
+      >
+        {display}
       </p>
     </div>
   )
 }
 
-function nameOf(accounts: readonly AccountView[], id: string | null): string {
-  if (id === null) return ''
-  return accounts.find((a) => a.accountId === id)?.name ?? id
+function colorFor(kind: string): string {
+  switch (kind) {
+    case 'income':
+      return 'var(--fin-income)'
+    case 'expense':
+      return 'var(--fin-expense)'
+    case 'borrow':
+    case 'payDebt':
+      return 'var(--fin-owed)'
+    case 'lend':
+    case 'collectDebt':
+      return 'var(--fin-receivable)'
+    case 'opening':
+      return 'var(--accent)'
+    default:
+      return 'var(--fin-transfer)'
+  }
 }
 
 function describe(e: unknown): string {
   const code = typeof e === 'object' && e !== null && 'code' in e ? String(e.code) : ''
   if (code === 'permission-denied') {
-    return 'رفض الخادم القراءة. غالبًا لم تُنشر قواعد الأمان بعد، أو حسابك ليس المالك المعتمد.'
+    return 'رفض الخادم القراءة. تأكّد أن حسابك هو المالك المعتمد وأن القواعد منشورة.'
   }
   if (code === 'failed-precondition') {
     return 'الاستعلام يحتاج فهرسًا لم يُنشر بعد. شغّل: npm run deploy:rules'
