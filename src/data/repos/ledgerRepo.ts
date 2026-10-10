@@ -25,6 +25,7 @@ export interface AccountView {
   subtype: string | null
   isCashLike: boolean
   balanceMinor: number
+  earmarkedMinor: number
   minBalanceMinor: number
   status: 'active' | 'archived'
   sortOrder: number
@@ -116,6 +117,7 @@ export function observeAccounts(
           subtype: (x['subtype'] as string | null | undefined) ?? null,
           isCashLike: (x['isCashLike'] as boolean | undefined) ?? false,
           balanceMinor: (x['balanceMinor'] as number | undefined) ?? 0,
+          earmarkedMinor: (x['earmarkedMinor'] as number | undefined) ?? 0,
           minBalanceMinor: (x['minBalanceMinor'] as number | undefined) ?? 0,
           status: (x['status'] as AccountView['status'] | undefined) ?? 'active',
           sortOrder: (x['sortOrder'] as number | undefined) ?? 0,

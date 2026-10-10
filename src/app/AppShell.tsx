@@ -11,7 +11,7 @@ import { today } from '@/lib/time'
  * السفلي في متناول الإبهام. (نفس منطق التثبيت في شريط BrandZo الجانبي.)
  */
 
-export type Route = 'dashboard' | 'debts' | 'obligations' | 'accounts' | 'reports'
+export type Route = 'dashboard' | 'debts' | 'obligations' | 'planning' | 'accounts' | 'reports'
 
 interface NavItem {
   key: Route
@@ -19,11 +19,13 @@ interface NavItem {
   icon: React.ReactElement
 }
 
+const DESKTOP_ONLY: readonly NavItem[] = [{ key: 'accounts', label: 'الحسابات', icon: <IconWallet /> }]
+
 const NAV: readonly NavItem[] = [
   { key: 'dashboard', label: 'الرئيسية', icon: <IconHome /> },
   { key: 'obligations', label: 'الالتزامات', icon: <IconCalendar /> },
   { key: 'debts', label: 'الديون', icon: <IconHandshake /> },
-  { key: 'accounts', label: 'الحسابات', icon: <IconWallet /> },
+  { key: 'planning', label: 'التخطيط', icon: <IconTarget /> },
   { key: 'reports', label: 'التقارير', icon: <IconChart /> },
 ]
 
@@ -84,7 +86,7 @@ export function AppShell({
 
         <nav className="flex-1">
           <ul className="space-y-1">
-            {NAV.map((item) => (
+            {[...NAV, ...DESKTOP_ONLY].map((item) => (
               <li key={item.key}>
                 <NavButton item={item} active={route === item.key} onClick={() => { onRoute(item.key) }} />
               </li>
@@ -269,6 +271,14 @@ function IconChart(): React.ReactElement {
   return (
     <svg viewBox="0 0 24 24" className="size-full" {...S}>
       <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+    </svg>
+  )
+}
+function IconTarget(): React.ReactElement {
+  return (
+    <svg viewBox="0 0 24 24" className="size-full" {...S}>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="3" />
     </svg>
   )
 }

@@ -8,6 +8,7 @@ import { AccountsScreen } from '@/features/accounts/AccountsScreen'
 import { DebtsScreen, ErrorBox, Loading } from '@/features/commitments/DebtsScreen'
 import { ObligationsScreen } from '@/features/commitments/ObligationsScreen'
 import { Dashboard } from '@/features/dashboard/Dashboard'
+import { PlanningScreen } from '@/features/planning/PlanningScreen'
 import { ReportsScreen } from '@/features/reports/ReportsScreen'
 import { env } from '@/lib/env'
 
@@ -93,6 +94,7 @@ function SignedIn({ user }: { user: SessionUser }): React.ReactElement {
           {route === 'dashboard' && <Dashboard uid={user.uid} accounts={accounts} />}
           {route === 'obligations' && <ObligationsScreen uid={user.uid} accounts={accounts} />}
           {route === 'debts' && <DebtsScreen uid={user.uid} accounts={accounts} />}
+          {route === 'planning' && <PlanningScreen uid={user.uid} accounts={accounts} />}
           {route === 'accounts' && <AccountsScreen uid={user.uid} accounts={accounts} />}
           {route === 'reports' && <ReportsScreen uid={user.uid} accounts={accounts} />}
         </>
