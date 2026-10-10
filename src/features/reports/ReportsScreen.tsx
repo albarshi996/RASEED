@@ -7,7 +7,8 @@ import { formatLYD, formatPercent, unsafeMinor } from '@/domain/money'
 import { kindLabel, type OpKind } from '@/domain/ops/plan'
 import { currentPeriodKey, periodRange, type PeriodKey } from '@/lib/time'
 
-import { Card, ErrorBox, Loading } from '../commitments/DebtsScreen'
+import { Card, ErrorBox, Loading } from '@/ui/components/primitives'
+import { PageHeader } from '@/ui/components/primitives'
 
 /**
  * التقارير — مبنية على القيود الفعلية لا على أرصدة مجمَّعة.
@@ -84,7 +85,12 @@ export function ReportsScreen({
   const maxCat = monthly.byCategory[0]?.[1] ?? 1
 
   return (
-    <div className="space-y-5">
+    <>
+      <PageHeader
+        title="التقارير"
+        description="أرقام مشتقة من القيود الفعلية. التحويل والاقتراض والسداد لا تدخل في الدخل ولا المصروفات — التصنيف من نوع الحساب لا من وسم العملية."
+      />
+      <div className="space-y-5">
       <Card>
         <label className="block">
           <span className="mb-1.5 block text-xs font-medium" style={{ color: 'var(--ink-2)' }}>
@@ -198,7 +204,8 @@ export function ReportsScreen({
           </li>
         </ul>
       </Card>
-    </div>
+      </div>
+    </>
   )
 }
 

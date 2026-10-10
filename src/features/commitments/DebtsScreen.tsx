@@ -10,6 +10,16 @@ import {
 import { type AccountView } from '@/data/repos/ledgerRepo'
 import { formatLYD, PARSE_ERROR_MESSAGES, parseAmountToMinor, unsafeMinor } from '@/domain/money'
 import { nowMs, today, toISODate } from '@/lib/time'
+import {
+  Card as UiCard,
+  Chip,
+  EmptyState,
+  ErrorBox,
+  Lbl,
+  Loading,
+  PageHeader,
+  Progress,
+} from '@/ui/components/primitives'
 import { ulid } from '@/lib/ulid'
 
 /**
@@ -49,7 +59,12 @@ export function DebtsScreen({
   if (debts === null) return <Loading />
 
   return (
-    <div className="space-y-5">
+    <>
+      <PageHeader
+        title="الديون"
+        description="ما عليك للآخرين وما لك عندهم. الدفعات تُسجَّل في الدفتر لا في سجل منفصل، فلا ينحرف رقم عن آخر."
+      />
+      <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2">
         {([
           ['payable', 'عليّ', 'var(--fin-owed)'],
@@ -79,7 +94,7 @@ export function DebtsScreen({
         </button>
       </div>
 
-      <Card>
+      <UiCard>
         <p className="text-xs" style={{ color: 'var(--ink-2)' }}>
           إجمالي المتبقي {tab === 'payable' ? 'عليّ' : 'لي'}
         </p>
@@ -90,7 +105,7 @@ export function DebtsScreen({
         >
           {formatLYD(unsafeMinor(openTotal))}
         </p>
-      </Card>
+      </UiCard>
 
       {showForm && (
         <NewDebtForm
@@ -102,11 +117,9 @@ export function DebtsScreen({
       )}
 
       {rows.length === 0 ? (
-        <Card>
-          <p className="py-6 text-center text-sm" style={{ color: 'var(--muted)' }}>
-            لا توجد ديون {tab === 'payable' ? 'عليك' : 'لك'}.
-          </p>
-        </Card>
+        <UiCard>
+          <EmptyState>لا توجد ديون {tab === 'payable' ? 'عليك' : 'لك'}.</EmptyState>
+        </UiCard>
       ) : (
         <ul className="space-y-3">
           {rows.map((d) => (
@@ -114,7 +127,8 @@ export function DebtsScreen({
           ))}
         </ul>
       )}
-    </div>
+      </div>
+    </>
   )
 }
 
@@ -169,10 +183,14 @@ function DebtCard({
 
   return (
     <li>
-      <Card>
+      <UiCard>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="truncate font-semibold">{debt.counterpartyName}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="truncate font-semibold">{debt.counterpartyName}</p>
+              {overdue && <Chip tone="var(--fin-expense)">متأخر</Chip>}
+              {settled && <Chip tone="var(--fin-income)">مسدَّد</Chip>}
+            </div>
             <p className="mt-0.5 text-xs" style={{ color: 'var(--muted)' }}>
               <span dir="ltr">{debt.startedAt}</span>
               {debt.dueDate !== null && (
@@ -200,14 +218,8 @@ function DebtCard({
           </div>
         </div>
 
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full" style={{ background: 'var(--surface-sunken)' }}>
-          <div
-            className="h-full rounded-full transition-all"
-            style={{
-              width: `${String(Math.min(100, pct))}%`,
-              background: settled ? 'var(--fin-income)' : 'var(--accent)',
-            }}
-          />
+        <div className="mt-3">
+          <Progress percent={pct} color={settled ? 'var(--fin-income)' : 'var(--accent)'} />
         </div>
 
         {debt.notes !== '' && (
@@ -280,7 +292,7 @@ function DebtCard({
             {debt.direction === 'payable' ? 'تسجيل سداد' : 'تسجيل تحصيل'}
           </button>
         )}
-      </Card>
+      </UiCard>
     </li>
   )
 }
@@ -339,7 +351,7 @@ function NewDebtForm({
 
   return (
     <form onSubmit={(e) => { void submit(e) }}>
-      <Card>
+      <UiCard>
         <h2 className="mb-1 text-base font-bold">
           {direction === 'payable' ? 'دين جديد عليّ' : 'دين جديد لي'}
         </h2>
@@ -439,50 +451,11 @@ function NewDebtForm({
             {msg}
           </p>
         )}
-      </Card>
+      </UiCard>
     </form>
   )
 }
 
-export function Card({ children }: { children: React.ReactNode }): React.ReactElement {
-  return (
-    <div
-      className="rounded-2xl border p-5"
-      style={{ background: 'var(--surface)', borderColor: 'var(--line)', boxShadow: 'var(--shadow-md)' }}
-    >
-      {children}
-    </div>
-  )
-}
-
-export function Lbl({ children }: { children: React.ReactNode }): React.ReactElement {
-  return (
-    <span className="mb-1.5 block text-xs font-medium" style={{ color: 'var(--ink-2)' }}>
-      {children}
-    </span>
-  )
-}
-
-export function Loading(): React.ReactElement {
-  return (
-    <p className="py-10 text-center text-sm" style={{ color: 'var(--muted)' }}>
-      جارٍ التحميل…
-    </p>
-  )
-}
-
-export function ErrorBox({ message }: { message: string }): React.ReactElement {
-  return (
-    <div
-      role="alert"
-      className="rounded-2xl border p-5 text-sm leading-relaxed"
-      style={{
-        background: 'var(--fin-expense-bg)',
-        borderColor: 'var(--fin-expense-border)',
-        color: 'var(--fin-expense)',
-      }}
-    >
-      {message}
-    </div>
-  )
-}
+// أُعيد تصديرها من مكتبة المكوّنات: الشاشات الأخرى تستوردها من هنا تاريخيًا،
+// وإعادة التصدير تمنع تعديل JSX في أربع شاشات بلا فائدة.
+export { Card, ErrorBox, Lbl, Loading } from '@/ui/components/primitives'

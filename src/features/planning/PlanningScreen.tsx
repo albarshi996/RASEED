@@ -25,7 +25,8 @@ import {
 } from '@/domain/planning/budget'
 import { currentPeriodKey, periodRange, toISODate, type PeriodKey } from '@/lib/time'
 
-import { Card, ErrorBox, Lbl, Loading } from '../commitments/DebtsScreen'
+import { Card, ErrorBox, Lbl, Loading } from '@/ui/components/primitives'
+import { PageHeader } from '@/ui/components/primitives'
 
 const HEALTH_COLOR: Record<BudgetHealth, string> = {
   safe: 'var(--fin-income)',
@@ -57,7 +58,12 @@ export function PlanningScreen({
 }): React.ReactElement {
   const [tab, setTab] = useState<'budget' | 'goals'>('budget')
   return (
-    <div className="space-y-5">
+    <>
+      <PageHeader
+        title="التخطيط المالي"
+        description="سقوف شهرية للإنفاق، وأهداف ادخار. الميزانية خطة لا حركة: وضع سقف لا يُنشئ قيدًا ولا يحجز مالًا."
+      />
+      <div className="space-y-5">
       <div className="flex gap-2">
         {([
           ['budget', 'الميزانية'],
@@ -83,7 +89,8 @@ export function PlanningScreen({
       ) : (
         <GoalsTab uid={uid} accounts={accounts} />
       )}
-    </div>
+      </div>
+    </>
   )
 }
 

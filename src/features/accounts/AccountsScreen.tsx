@@ -8,7 +8,8 @@ import { type AccountType } from '@/domain/ledger/chartOfAccounts'
 import { nowMs, today, toISODate } from '@/lib/time'
 import { ulid } from '@/lib/ulid'
 
-import { Card, Lbl } from '../commitments/DebtsScreen'
+import { Card, Lbl } from '@/ui/components/primitives'
+import { PageHeader } from '@/ui/components/primitives'
 
 const TYPE_AR: Record<AccountType, string> = {
   asset: 'الأصول',
@@ -50,7 +51,12 @@ export function AccountsScreen({
   const balanced = trialDebit === trialCredit
 
   return (
-    <div className="space-y-5">
+    <>
+      <PageHeader
+        title="الحسابات"
+        description="شجرة الحسابات بأرصدتها، وميزان مراجعة حيّ يكشف أي انحراف بين الرصيد والحركات."
+      />
+      <div className="space-y-5">
       <AddFundsCard uid={uid} accounts={accounts} />
 
       <Card>
@@ -147,7 +153,8 @@ export function AccountsScreen({
           </section>
         )
       })}
-    </div>
+      </div>
+    </>
   )
 }
 

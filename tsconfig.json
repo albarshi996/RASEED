@@ -13,7 +13,7 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["vite/client", "vite-plugin-pwa/client", "@testing-library/jest-dom"],
+    "types": ["vite/client", "vite-plugin-pwa/client", "vite-plugin-pwa/react", "@testing-library/jest-dom"],
     "paths": { "@/*": ["./src/*"] },
 
     /* الصرامة — غير قابلة للتخفيف. نظام مالي لا يحتمل any ضمنيًا. */

@@ -10,10 +10,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      // 'autoUpdate' لا 'prompt': الوضع 'prompt' يتطلب واجهة تطلب إذن التحديث،
-      // وبدونها يبقى عامل الخدمة على نسخة قديمة إلى الأبد — وقد حدث فعلًا.
-      // التحديث التلقائي أصحّ لتطبيق مالي: نسخة قديمة قد تعرض رصيدًا بمنطق قديم.
-      registerType: 'autoUpdate',
+      // 'prompt' مع واجهة فعلية في UpdateToast — لا صامتًا.
+      // كان الوضع 'prompt' بلا واجهة يُبقي عامل الخدمة على نسخة قديمة إلى الأبد،
+      // وهو ما حدث فعلًا فظهرت شاشات قديمة بعد نشرات متتالية.
+      // المستخدم يرى «نسخة جديدة متاحة» ويحدّث بنقرة، فلا يبقى على نسخة قديمة صامتًا.
+      registerType: 'prompt',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'رصيد | RASEED',

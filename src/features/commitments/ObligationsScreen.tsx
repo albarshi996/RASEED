@@ -15,7 +15,8 @@ import { formatLYD, PARSE_ERROR_MESSAGES, parseAmountToMinor, unsafeMinor } from
 import { diffDays, nowMs, today, toISODate } from '@/lib/time'
 import { ulid } from '@/lib/ulid'
 
-import { Card, ErrorBox, Lbl, Loading } from './DebtsScreen'
+import { Card, ErrorBox, Lbl, Loading } from '@/ui/components/primitives'
+import { PageHeader } from '@/ui/components/primitives'
 
 /**
  * شاشة الالتزامات — الإيجار والفواتير والأقساط والاشتراكات.
@@ -78,7 +79,12 @@ export function ObligationsScreen({
   if (rows === null) return <Loading />
 
   return (
-    <div className="space-y-5">
+    <>
+      <PageHeader
+        title="الالتزامات"
+        description="إيجار وفواتير وأقساط واشتراكات. إنشاء التزام لا يخفض رصيدك — الرصيد ينقص عند السداد الفعلي وحده."
+      />
+      <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-2">
         <Card>
           <p className="text-xs" style={{ color: 'var(--ink-2)' }}>
@@ -141,7 +147,8 @@ export function ObligationsScreen({
           ))}
         </ul>
       )}
-    </div>
+      </div>
+    </>
   )
 }
 
