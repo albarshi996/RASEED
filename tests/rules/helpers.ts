@@ -14,10 +14,10 @@ export const OWNER_UID = 'owner-test-uid'
 export const INTRUDER_UID = 'intruder-test-uid'
 export const OTHER_UID = 'other-test-uid'
 
-export async function makeTestEnv(): Promise<RulesTestEnvironment> {
-  const rules = readFileSync('firestore.rules', 'utf8').replace('REPLACE_WITH_OWNER_UID', OWNER_UID)
+export async function makeTestEnv(projectId = 'raseed-rules-test'): Promise<RulesTestEnvironment> {
+  const rules = readFileSync('firestore.rules', 'utf8').replace(/'[A-Za-z0-9]{20,}'/, "'" + OWNER_UID + "'")
   return initializeTestEnvironment({
-    projectId: 'raseed-rules-test',
+    projectId,
     firestore: { rules, host: '127.0.0.1', port: 8080 },
   })
 }

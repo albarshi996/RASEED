@@ -6,27 +6,12 @@ service cloud.firestore {
   // تسجيل دخول ثم يُثبَّت هنا. البريد قابل للتغيير بينما UID ثابت.
   // ──────────────────────────────────────────────────────────────
   function allowedUids() {
-    return ['REPLACE_WITH_OWNER_UID'];   // + UID احتياطي عند الحاجة
+    return ['6q0YNrwagSgRAAwcGmOJBgiL7VS2'];   // + UID احتياطي عند الحاجة
   }
-  // ── مسار الإقلاع (bootstrap) — مؤقّت وموثَّق ───────────────────────────
-  // ق-2 يقضي بأن الإغلاق على UID لا على البريد، لأن البريد قابل للتغيير.
-  // لكن UID لا يُعرف إلا بعد أول تسجيل دخول، ونشر القواعد بالعنصر النائب وحده
-  // يُغلق النظام على المالك نفسه فلا يستطيع الدخول أصلًا.
-  //
-  // لذلك يُقبل **مؤقتًا** بريد Google المُتحقَّق منه. وهذا ليس إضعافًا أمنيًا:
-  // Google هي من تُصدر email_verified ولا يستطيع أحد انتحال بريد لا يملكه.
-  // القيد الحقيقي أن البريد قد يتغيّر مستقبلًا، ولهذا **يُحذف هذا المسار
-  // فور تثبيت UID المالك في allowedUids أعلاه**.
-  function isBootstrapOwner() {
-    return request.auth != null
-        && request.auth.token.email_verified == true
-        && request.auth.token.email == 'albarshi.96@gmail.com';
-  }
-
   function isOwner(uid) {
     return request.auth != null
         && request.auth.uid == uid
-        && (uid in allowedUids() || isBootstrapOwner());   // ← الإغلاق الفعلي (ق-2)
+        && uid in allowedUids();          // ← الإغلاق الفعلي (ق-2)
   }
 
   function isPosInt(v) {

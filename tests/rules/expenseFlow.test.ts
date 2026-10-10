@@ -6,9 +6,8 @@
  * ثم يتحقق من الأرصدة والمجمَّعات وميزان المراجعة.
  */
 
-import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing'
+import { type RulesTestEnvironment } from '@firebase/rules-unit-testing'
 import { collection, doc, getDoc, getDocs, type Firestore } from 'firebase/firestore'
-import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { postExpense } from '@/data/ledger/postExpense'
@@ -17,17 +16,13 @@ import { SEED_ACCOUNTS } from '@/domain/ledger/chartOfAccounts'
 import { unsafeMinor } from '@/domain/money'
 import { toISODate } from '@/lib/time'
 
-import { OWNER_UID } from './helpers'
+import { makeTestEnv, OWNER_UID } from './helpers'
 
 let env: RulesTestEnvironment
 let db: Firestore
 
 beforeAll(async () => {
-  const rules = readFileSync('firestore.rules', 'utf8').replace('REPLACE_WITH_OWNER_UID', OWNER_UID)
-  env = await initializeTestEnvironment({
-    projectId: 'raseed-flow-test',
-    firestore: { rules, host: '127.0.0.1', port: 8080 },
-  })
+  env = await makeTestEnv('raseed-flow-test')
   db = env.authenticatedContext(OWNER_UID).firestore() as unknown as Firestore
 })
 
